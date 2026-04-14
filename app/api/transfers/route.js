@@ -1,4 +1,4 @@
-import pool from "../../../../config/db";
+import pool from "../../../config/db";
 import { NextResponse } from "next/server";
 
 export async function GET(req) {
@@ -214,6 +214,7 @@ export async function POST(req) {
       { status: 201 },
     );
   } catch (error) {
+    console.log({ error });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

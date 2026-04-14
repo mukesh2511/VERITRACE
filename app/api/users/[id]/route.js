@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 
 export async function GET(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     const [rows] = await pool.execute(
       `SELECT u.user_id, u.org_id, u.name, u.email, u.role, 
@@ -13,14 +13,11 @@ export async function GET(req, { params }) {
        FROM users u
        LEFT JOIN organizations o ON u.org_id = o.org_id
        WHERE u.user_id = ?`,
-      [id]
+      [id],
     );
 
     if (rows.length === 0) {
-      return NextResponse.json(
-        { message: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ message: "User not found" }, { status: 404 });
     }
 
     return NextResponse.json(rows[0]);
@@ -31,21 +28,18 @@ export async function GET(req, { params }) {
 
 export async function PUT(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const body = await req.json();
     const { org_id, name, email, role, phone, is_active, password } = body;
 
     // Check if user exists
     const [userCheck] = await pool.execute(
       "SELECT user_id FROM users WHERE user_id = ?",
-      [id]
+      [id],
     );
 
     if (userCheck.length === 0) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     // Build dynamic update query
@@ -56,12 +50,12 @@ export async function PUT(req, { params }) {
       // Check if organization exists
       const [orgCheck] = await pool.execute(
         "SELECT org_id FROM organizations WHERE org_id = ?",
-        [org_id]
+        [org_id],
       );
       if (orgCheck.length === 0) {
         return NextResponse.json(
           { error: "Organization not found" },
-          { status: 404 }
+          { status: 404 },
         );
       }
       updateFields.push("org_id = ?");
@@ -72,7 +66,7 @@ export async function PUT(req, { params }) {
       if (name.length > 255) {
         return NextResponse.json(
           { error: "Name must be less than 255 characters" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       updateFields.push("name = ?");
@@ -83,18 +77,18 @@ export async function PUT(req, { params }) {
       if (email.length > 255) {
         return NextResponse.json(
           { error: "Email must be less than 255 characters" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       // Check if email already exists for another user
       const [emailCheck] = await pool.execute(
         "SELECT user_id FROM users WHERE email = ? AND user_id != ?",
-        [email, id]
+        [email, id],
       );
       if (emailCheck.length > 0) {
         return NextResponse.json(
           { error: "Email already exists" },
-          { status: 409 }
+          { status: 409 },
         );
       }
       updateFields.push("email = ?");
@@ -102,10 +96,10 @@ export async function PUT(req, { params }) {
     }
 
     if (role !== undefined) {
-      if (!['admin', 'manager', 'operator'].includes(role)) {
+      if (!["admin", "manager", "operator"].includes(role)) {
         return NextResponse.json(
           { error: "Invalid role. Must be admin, manager, or operator" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       updateFields.push("role = ?");
@@ -132,19 +126,18 @@ export async function PUT(req, { params }) {
     if (updateFields.length === 0) {
       return NextResponse.json(
         { error: "No fields to update" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     params.push(id);
 
-    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE user_id = ?`;
+    const query = `UPDATE users SET ${updateFields.join(", ")} WHERE user_id = ?`;
     await pool.execute(query, params);
 
     return NextResponse.json({
-      message: "User updated successfully"
+      message: "User updated successfully",
     });
-
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -157,22 +150,18 @@ export async function DELETE(req, { params }) {
     // Check if user exists
     const [userCheck] = await pool.execute(
       "SELECT user_id FROM users WHERE user_id = ?",
-      [id]
+      [id],
     );
 
     if (userCheck.length === 0) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     await pool.execute("DELETE FROM users WHERE user_id = ?", [id]);
 
     return NextResponse.json({
-      message: "User deleted successfully"
+      message: "User deleted successfully",
     });
-
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

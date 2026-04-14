@@ -10,6 +10,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  Truck,
 } from "lucide-react";
 
 export default function ProvenancePage() {
@@ -37,9 +38,19 @@ export default function ProvenancePage() {
     setError("");
 
     try {
-      const response = await fetch(
-        `/api/provenance/${encodeURIComponent(serialNumber.trim())}`,
-      );
+      const response = await fetch("/api/provenance/trace", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          serial_number: serialNumber.trim(),
+          trace_depth: "full",
+          include_assemblies: true,
+          include_transfers: true,
+          include_status_history: true,
+        }),
+      });
       const data = await response.json();
 
       if (response.ok) {
@@ -78,18 +89,18 @@ export default function ProvenancePage() {
     setExpandedNodes(newExpanded);
   };
 
-  const renderComponentTree = (components, level = 0, parentId = "root") => {
-    if (!components || components.length === 0) return null;
+  const renderAssemblyTree = (assemblies, level = 0, parentId = "root") => {
+    if (!assemblies || assemblies.length === 0) return null;
 
-    return components.map((component) => {
-      const nodeId = `${parentId}-${component.unit_id}`;
+    return assemblies.map((assembly) => {
+      const nodeId = `${parentId}-${assembly.unit_id}`;
       const isExpanded = expandedNodes.has(nodeId);
       const hasChildren =
-        component.components && component.components.length > 0;
+        assembly.parent_assemblies && assembly.parent_assemblies.length > 0;
 
       return (
         <div
-          key={component.unit_id}
+          key={assembly.unit_id}
           className={`ml-${level === 0 ? 0 : 8} transition-all duration-200`}
         >
           <div className="provenance-node inline-block">
@@ -109,18 +120,18 @@ export default function ProvenancePage() {
               )}
               <div className="flex-1">
                 <div className="font-semibold text-white">
-                  {component.serial_number}
+                  {assembly.serial_number}
                 </div>
                 <div className="text-sm text-gray-300">
-                  {component.product_name}
+                  {assembly.product_name}
                 </div>
                 <div className="text-xs text-gray-400">
-                  {component.manufacturer?.name} (
-                  {component.manufacturer?.country})
+                  {assembly.manufacturer?.name} (
+                  {assembly.manufacturer?.country})
                 </div>
-                {component.quantity > 1 && (
+                {assembly.quantity_used && (
                   <div className="text-xs text-blue-300 mt-1">
-                    Quantity: {component.quantity}
+                    Quantity Used: {assembly.quantity_used}
                   </div>
                 )}
               </div>
@@ -128,7 +139,11 @@ export default function ProvenancePage() {
           </div>
           {hasChildren && isExpanded && (
             <div className="ml-4 border-l-2 border-gray-600 pl-4 mt-2">
-              {renderComponentTree(component.components, level + 1, nodeId)}
+              {renderAssemblyTree(
+                assembly.parent_assemblies,
+                level + 1,
+                nodeId,
+              )}
             </div>
           )}
         </div>
@@ -137,408 +152,1054 @@ export default function ProvenancePage() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-white mb-4">
-          Product Provenance Tracker
-        </h1>
-        <p className="text-lg text-gray-300 max-w-2xl mx-auto">
-          Enter a product serial number to trace its complete journey through
-          the supply chain
-        </p>
-      </div>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
-      {/* Search Section */}
-      <div className="glass-card p-6 md:p-8 max-w-4xl mx-auto">
-        <div className="space-y-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                value={serialNumber}
-                onChange={(e) => setSerialNumber(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Enter product serial number (e.g., LAP-SN-1001)"
-                className="glass-input w-full pl-12 pr-4 py-4 text-lg"
-              />
-            </div>
-            <button
-              onClick={handleSearch}
-              disabled={loading}
-              className="glass-button-primary px-8 py-4 text-lg font-semibold disabled:opacity-50 whitespace-nowrap"
+        * { box-sizing: border-box; }
+
+        .vt-root {
+          font-family: 'DM Sans', sans-serif;
+          min-height: 100vh;
+          background: #0A0F1E;
+          color: #E8EDF7;
+          overflow-x: hidden;
+        }
+
+        .syne { font-family: 'Syne', sans-serif; }
+
+        /* Noise texture overlay */
+        .vt-root::before {
+          content: '';
+          position: fixed;
+          inset: 0;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+          opacity: 0.025;
+          pointer-events: none;
+          z-index: 0;
+        }
+
+        .vt-content { position: relative; z-index: 1; }
+
+        /* Grid background */
+        .grid-bg {
+          position: fixed;
+          inset: 0;
+          background-image:
+            linear-gradient(rgba(79, 142, 247, 0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(79, 142, 247, 0.04) 1px, transparent 1px);
+          background-size: 60px 60px;
+          pointer-events: none;
+          z-index: 0;
+        }
+
+        /* Glow blobs */
+        .blob {
+          position: fixed;
+          border-radius: 50%;
+          filter: blur(120px);
+          pointer-events: none;
+          z-index: 0;
+          opacity: 0.15;
+        }
+        .blob-1 { width: 600px; height: 600px; background: #4F8EF7; top: -200px; right: -100px; }
+        .blob-2 { width: 500px; height: 500px; background: #00C9A7; bottom: 100px; left: -150px; }
+        .blob-3 { width: 400px; height: 400px; background: #B06EF7; top: 40%; left: 40%; transform: translate(-50%, -50%); opacity: 0.08; }
+
+        /* Cards */
+        .card {
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius: 20px;
+          backdrop-filter: blur(10px);
+          transition: all 0.35s ease;
+        }
+        .card:hover {
+          background: rgba(255,255,255,0.055);
+          border-color: rgba(255,255,255,0.13);
+          transform: translateY(-3px);
+          box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+        }
+
+        /* Input styles */
+        .glass-input {
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 12px;
+          color: #E8EDF7;
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.95rem;
+          padding: 12px 16px;
+          transition: all 0.3s ease;
+          width: 100%;
+        }
+        .glass-input:focus {
+          outline: none;
+          border-color: rgba(79,142,247,0.5);
+          background: rgba(255,255,255,0.06);
+          box-shadow: 0 0 0 4px rgba(79,142,247,0.08);
+        }
+        .glass-input::placeholder {
+          color: rgba(232,237,247,0.3);
+        }
+
+        /* Button styles */
+        .glass-button {
+          background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 12px;
+          color: #E8EDF7;
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.9rem;
+          font-weight: 500;
+          padding: 12px 24px;
+          transition: all 0.3s ease;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .glass-button:hover {
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.2);
+          transform: translateY(-1px);
+        }
+
+        .glass-button-primary {
+          background: linear-gradient(135deg, #4F8EF7, #00C9A7);
+          border: none;
+          border-radius: 12px;
+          color: #fff;
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.9rem;
+          font-weight: 600;
+          padding: 12px 24px;
+          transition: all 0.3s ease;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .glass-button-primary:hover {
+          opacity: 0.9;
+          transform: translateY(-1px);
+          box-shadow: 0 8px 25px rgba(79, 142, 247, 0.3);
+        }
+
+        /* Status badges */
+        .status-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 12px;
+          border-radius: 50px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+        .status-created { background: rgba(79, 142, 247, 0.15); color: #4F8EF7; border: 1px solid rgba(79, 142, 247, 0.3); }
+        .status-assembled { background: rgba(0, 201, 167, 0.15); color: #00C9A7; border: 1px solid rgba(0, 201, 167, 0.3); }
+        .status-in-transit { background: rgba(247, 168, 79, 0.15); color: #F7A84F; border: 1px solid rgba(247, 168, 79, 0.3); }
+        .status-delivered { background: rgba(176, 110, 247, 0.15); color: #B06EF7; border: 1px solid rgba(176, 110, 247, 0.3); }
+        .status-retired { background: rgba(247, 79, 79, 0.15); color: #F74F4F; border: 1px solid rgba(247, 79, 79, 0.3); }
+
+        /* Animations */
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(24px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-up { animation: fadeUp 0.6s ease forwards; }
+        .delay-1 { animation-delay: 0.1s; opacity: 0; }
+        .delay-2 { animation-delay: 0.2s; opacity: 0; }
+        .delay-3 { animation-delay: 0.3s; opacity: 0; }
+        .delay-4 { animation-delay: 0.4s; opacity: 0; }
+
+        /* Loading spinner */
+        .spinner {
+          width: 20px; height: 20px;
+          border: 2px solid rgba(255,255,255,0.2);
+          border-top-color: #4F8EF7;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Provenance tree */
+        .provenance-tree {
+          font-family: 'DM Sans', sans-serif;
+        }
+        .provenance-node {
+          transition: all 0.2s ease;
+        }
+        .provenance-node:hover {
+          background: rgba(255,255,255,0.05);
+        }
+      `}</style>
+
+      <div className="vt-root">
+        <div className="grid-bg" />
+        <div className="blob blob-1" />
+        <div className="blob blob-2" />
+        <div className="blob blob-3" />
+
+        <div className="vt-content">
+          <div
+            style={{
+              maxWidth: 1280,
+              margin: "0 auto",
+              padding: "60px 40px 100px",
+            }}
+          >
+            {/* ─── HEADER ─── */}
+            <div
+              style={{ textAlign: "center", marginBottom: 60 }}
+              className="fade-up"
             >
-              {loading ? (
-                <div className="flex items-center space-x-2">
-                  <div className="loading-spinner w-5 h-5"></div>
-                  <span>Tracking...</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2">
-                  <Search className="w-5 h-5" />
-                  <span>Track Product</span>
-                </div>
-              )}
-            </button>
-          </div>
+              <h1
+                className="syne"
+                style={{
+                  fontSize: "clamp(2.5rem, 5vw, 4rem)",
+                  fontWeight: 800,
+                  lineHeight: 0.95,
+                  letterSpacing: "-0.03em",
+                  background:
+                    "linear-gradient(135deg, #ffffff 0%, #a8c4f0 50%, #00C9A7 100%)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                  margin: "20px 0",
+                }}
+              >
+                Product Provenance Tracker
+              </h1>
+              <p
+                style={{
+                  fontSize: "1.1rem",
+                  color: "rgba(232,237,247,0.6)",
+                  maxWidth: 600,
+                  margin: "0 auto",
+                  lineHeight: 1.6,
+                  fontWeight: 300,
+                }}
+              >
+                Enter a product serial number to trace its complete journey
+                through the supply chain
+              </p>
+            </div>
 
-          {/* Search History */}
-          {searchHistory.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-2">
-              <span className="text-sm text-gray-400 self-center">Recent:</span>
-              {searchHistory.map((serial, index) => (
-                <button
-                  key={index}
-                  onClick={() => {
-                    setSerialNumber(serial);
-                    handleSearch();
+            {/* ─── SEARCH SECTION ─── */}
+            <div
+              className="card fade-up delay-1"
+              style={{ padding: "40px 32px", marginBottom: 32 }}
+            >
+              <div style={{ spaceY: 16 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
                   }}
-                  className="glass-button text-xs px-3 py-1 hover:bg-white hover:bg-opacity-20"
                 >
-                  {serial}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {error && (
-          <div className="mt-4 p-4 bg-red-500 bg-opacity-20 border border-red-400 rounded-lg flex items-center space-x-2">
-            <AlertCircle className="w-5 h-5 text-red-300" />
-            <p className="text-red-200">{error}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Results */}
-      {provenanceData && (
-        <div className="space-y-8 slide-in">
-          {/* Product Information */}
-          <div className="glass-card p-6 md:p-8">
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-6 flex items-center space-x-3">
-              <Package className="w-8 h-8 text-blue-400" />
-              <span>Product Information</span>
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-blue-400 rounded-full"></span>
-                  <span>Serial Number</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base break-all">
-                  {provenanceData.product.serial_number}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-green-400 rounded-full"></span>
-                  <span>Product Name</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base">
-                  {provenanceData.product.product_name}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-purple-400 rounded-full"></span>
-                  <span>Type</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base">
-                  {provenanceData.product.product_type}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-orange-400 rounded-full"></span>
-                  <span>Status</span>
-                </label>
-                <span
-                  className={`status-badge status-${provenanceData.product.status} inline-block`}
-                >
-                  {provenanceData.product.status}
-                </span>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-cyan-400 rounded-full"></span>
-                  <span>Manufacturer</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base">
-                  {provenanceData.product.manufacturer?.name || "N/A"}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-pink-400 rounded-full"></span>
-                  <span>Country</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base">
-                  {provenanceData.product.manufacturer?.country || "N/A"}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-400 flex items-center space-x-2">
-                  <span className="w-2 h-2 bg-yellow-400 rounded-full"></span>
-                  <span>Manufacturing Date</span>
-                </label>
-                <p className="text-white font-semibold text-sm md:text-base">
-                  {new Date(
-                    provenanceData.product.manufacturing_date,
-                  ).toLocaleDateString()}
-                </p>
-              </div>
-              {provenanceData.product.batch_info && (
-                <div className="space-y-2">
-                  <label className="text-sm text-gray-400 flex items-center space-x-2">
-                    <span className="w-2 h-2 bg-indigo-400 rounded-full"></span>
-                    <span>Batch</span>
-                  </label>
-                  <p className="text-white font-semibold text-sm md:text-base">
-                    {provenanceData.product.batch_info.batch_number} (
-                    {provenanceData.product.batch_info.units_in_batch} units)
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Component Hierarchy */}
-          {provenanceData.components &&
-            provenanceData.components.length > 0 && (
-              <div className="glass-card p-6 md:p-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl md:text-3xl font-bold text-white flex items-center space-x-3">
-                    <Package className="w-8 h-8 text-green-400" />
-                    <span>Component Hierarchy</span>
-                  </h2>
-                  <button
-                    onClick={() => {
-                      const allNodeIds = new Set();
-                      const collectNodeIds = (
-                        components,
-                        parentId = "root",
-                      ) => {
-                        components.forEach((component) => {
-                          const nodeId = `${parentId}-${component.unit_id}`;
-                          allNodeIds.add(nodeId);
-                          if (component.components) {
-                            collectNodeIds(component.components, nodeId);
-                          }
-                        });
-                      };
-                      collectNodeIds(provenanceData.components);
-                      setExpandedNodes(allNodeIds);
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 16,
+                      alignItems: "stretch",
                     }}
-                    className="glass-button text-sm px-4 py-2"
                   >
-                    Expand All
-                  </button>
-                </div>
-                <div className="provenance-tree overflow-x-auto">
-                  <div className="min-w-max">
-                    <div className="provenance-node">
-                      <div className="flex items-center space-x-3 p-4 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 bg-opacity-20">
-                        <span className="text-2xl">📦</span>
-                        <div>
-                          <div className="font-bold text-lg text-white">
-                            {provenanceData.product.serial_number}
-                          </div>
-                          <div className="text-sm text-gray-200">
-                            {provenanceData.product.product_name}
-                          </div>
-                          <div className="text-xs text-gray-300">
-                            {provenanceData.product.manufacturer?.name} (
-                            {provenanceData.product.manufacturer?.country})
-                          </div>
+                    <div style={{ flex: 1, position: "relative" }}>
+                      <Search
+                        className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5"
+                        style={{
+                          position: "absolute",
+                          left: 16,
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          color: "rgba(232,237,247,0.4)",
+                          width: 20,
+                          height: 20,
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={serialNumber}
+                        onChange={(e) => setSerialNumber(e.target.value)}
+                        onKeyPress={(e) => e.key === "Enter" && handleSearch()}
+                        className="glass-input"
+                        style={{
+                          paddingLeft: 52,
+                          paddingRight: 20,
+                          fontSize: "1rem",
+                          padding: "16px 20px 16px 52px",
+                        }}
+                        placeholder="Enter product serial number (e.g., LAP-SN-1001)"
+                      />
+                    </div>
+                    <button
+                      onClick={handleSearch}
+                      disabled={loading}
+                      className="glass-button-primary"
+                      style={{
+                        fontSize: "1rem",
+                        padding: "16px 32px",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {loading ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <div className="spinner" />
+                          <span>Tracking...</span>
                         </div>
-                      </div>
-                    </div>
-                    <div className="ml-4 border-l-2 border-gray-600 pl-4">
-                      {renderComponentTree(provenanceData.components)}
-                    </div>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <Search className="w-5 h-5" />
+                          <span>Track Product</span>
+                        </div>
+                      )}
+                    </button>
                   </div>
-                </div>
-              </div>
-            )}
 
-          {/* Supply Chain Journey */}
-          {provenanceData.supply_chain_journey &&
-            provenanceData.supply_chain_journey.length > 0 && (
-              <div className="glass-card p-6 md:p-8">
-                <h2 className="text-2xl md:text-3xl font-bold text-white mb-6 flex items-center space-x-3">
-                  <Truck className="w-8 h-8 text-orange-400" />
-                  <span>Supply Chain Journey</span>
-                </h2>
-                <div className="space-y-4">
-                  {provenanceData.supply_chain_journey.map(
-                    (transfer, index) => (
-                      <div key={index} className="relative">
-                        {/* Timeline Line */}
-                        {index <
-                          provenanceData.supply_chain_journey.length - 1 && (
-                          <div className="absolute left-6 top-16 w-0.5 h-full bg-gray-600"></div>
-                        )}
-
-                        <div className="flex items-start space-x-4 p-4 bg-white bg-opacity-5 rounded-lg hover:bg-opacity-10 transition-all duration-200">
-                          <div className="flex-shrink-0 w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-xl shadow-lg">
-                            {transfer.status === "shipped" && "📤"}
-                            {transfer.status === "in_transit" && "🚚"}
-                            {transfer.status === "received" && "📥"}
-                            {transfer.status === "manufactured" && "🏭"}
-                            {transfer.status === "quality_check" && "🔍"}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 space-y-2 sm:space-y-0">
-                              <span
-                                className={`status-badge status-${transfer.status} inline-block`}
-                              >
-                                {transfer.status
-                                  .replace("_", " ")
-                                  .toUpperCase()}
-                              </span>
-                              <div className="flex items-center text-sm text-gray-400">
-                                <Clock className="w-4 h-4 mr-1" />
-                                {new Date(transfer.timestamp).toLocaleString()}
-                              </div>
-                            </div>
-
-                            <div className="space-y-2">
-                              <div className="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-2">
-                                {transfer.from?.organization && (
-                                  <>
-                                    <span className="text-orange-300 font-medium">
-                                      {transfer.from.organization}
-                                    </span>
-                                    <ArrowRight className="w-4 h-4 text-gray-400 hidden sm:block" />
-                                    <span className="text-gray-400 sm:hidden">
-                                      →
-                                    </span>
-                                  </>
-                                )}
-                                <span className="text-green-300 font-medium">
-                                  {transfer.to.organization}
-                                </span>
-                              </div>
-
-                              {transfer.location && (
-                                <div className="flex items-center text-sm text-blue-300">
-                                  <MapPin className="w-4 h-4 mr-1" />
-                                  {transfer.location.name},{" "}
-                                  {transfer.location.country}
-                                </div>
-                              )}
-
-                              {transfer.tracking_number && (
-                                <div className="text-sm text-gray-400 bg-black bg-opacity-20 px-3 py-1 rounded-full inline-block">
-                                  📦 Tracking: {transfer.tracking_number}
-                                </div>
-                              )}
-
-                              {transfer.notes && (
-                                <div className="text-sm text-gray-300 italic mt-2">
-                                  "{transfer.notes}"
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ),
+                  {/* Search History */}
+                  {searchHistory.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        paddingTop: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: "0.85rem",
+                          color: "rgba(232,237,247,0.4)",
+                          alignSelf: "center",
+                        }}
+                      >
+                        Recent:
+                      </span>
+                      {searchHistory.map((serial, index) => (
+                        <button
+                          key={index}
+                          onClick={() => {
+                            setSerialNumber(serial);
+                            handleSearch();
+                          }}
+                          className="glass-button"
+                          style={{
+                            fontSize: "0.8rem",
+                            padding: "6px 12px",
+                            hover: { backgroundColor: "rgba(255,255,255,0.1)" },
+                          }}
+                        >
+                          {serial}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
-              </div>
-            )}
 
-          {/* Status History */}
-          {provenanceData.status_history &&
-            provenanceData.status_history.length > 0 && (
-              <div className="glass-card p-6 md:p-8">
-                <h2 className="text-2xl md:text-3xl font-bold text-white mb-6 flex items-center space-x-3">
-                  <Clock className="w-8 h-8 text-purple-400" />
-                  <span>Status History</span>
-                </h2>
-                <div className="space-y-3">
-                  {provenanceData.status_history.map((status, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center space-x-4 p-4 bg-white bg-opacity-5 rounded-lg hover:bg-opacity-10 transition-all duration-200"
+                {error && (
+                  <div
+                    style={{
+                      padding: "16px 20px",
+                      background: "rgba(247, 79, 79, 0.1)",
+                      border: "1px solid rgba(247, 79, 79, 0.3)",
+                      borderRadius: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                    }}
+                  >
+                    <AlertCircle
+                      className="w-5 h-5"
+                      style={{ color: "#F74F4F" }}
+                    />
+                    <p style={{ color: "#F74F4F", margin: 0 }}>{error}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ─── RESULTS ─── */}
+            {provenanceData && (
+              <div style={{ spaceY: 32 }} className="fade-up delay-2">
+                {/* Product Information */}
+                <div className="card" style={{ padding: "32px 28px" }}>
+                  <div style={{ marginBottom: 24 }}>
+                    <h2
+                      className="syne"
+                      style={{
+                        fontSize: "1.3rem",
+                        fontWeight: 700,
+                        color: "#fff",
+                        marginBottom: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
                     >
-                      <div className="flex-shrink-0">
-                        {status.from && (
-                          <span
-                            className={`status-badge status-${status.from}`}
+                      <Package
+                        className="w-7 h-7"
+                        style={{ color: "#4F8EF7" }}
+                      />
+                      Product Information
+                    </h2>
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(250px, 1fr))",
+                      gap: 20,
+                    }}
+                  >
+                    {[
+                      {
+                        label: "Serial Number",
+                        value: provenanceData.component.serial_number,
+                        color: "#4F8EF7",
+                      },
+                      {
+                        label: "Product Name",
+                        value: provenanceData.component.product_name,
+                        color: "#00C9A7",
+                      },
+                      {
+                        label: "Type",
+                        value: provenanceData.component.product_type,
+                        color: "#B06EF7",
+                      },
+                      {
+                        label: "Status",
+                        value: provenanceData.component.status,
+                        color: "#F7A84F",
+                        isBadge: true,
+                      },
+                      {
+                        label: "Manufacturer",
+                        value:
+                          provenanceData.component.manufacturer?.name || "N/A",
+                        color: "#00C9A7",
+                      },
+                      {
+                        label: "Country",
+                        value:
+                          provenanceData.component.manufacturer?.country ||
+                          "N/A",
+                        color: "#B06EF7",
+                      },
+                      {
+                        label: "Manufacturing Date",
+                        value: new Date(
+                          provenanceData.component.manufacturing_date,
+                        ).toLocaleDateString(),
+                        color: "#F7A84F",
+                      },
+                    ]
+                      .filter(Boolean)
+                      .map((item, index) => (
+                        <div key={index} style={{ spaceY: 6 }}>
+                          <label
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              fontSize: "0.85rem",
+                              fontWeight: 500,
+                              color: "rgba(232,237,247,0.7)",
+                              marginBottom: 6,
+                            }}
                           >
-                            {status.from}
-                          </span>
-                        )}
-                      </div>
-                      <ArrowRight className="w-5 h-5 text-gray-400 flex-shrink-0" />
-                      <div className="flex-shrink-0">
-                        <span className={`status-badge status-${status.to}`}>
-                          {status.to}
-                        </span>
-                      </div>
-                      <div className="flex-1 text-right min-w-0">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end space-y-1 sm:space-y-0 sm:space-x-2">
-                          <div className="text-sm text-gray-400">
-                            {new Date(status.timestamp).toLocaleString()}
-                          </div>
-                          {status.changed_by_name && (
-                            <div className="text-xs text-gray-400">
-                              by {status.changed_by_name}
-                            </div>
+                            <span
+                              style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: item.color,
+                              }}
+                            />
+                            <span>{item.label}</span>
+                          </label>
+                          {item.isBadge ? (
+                            <span
+                              className={`status-badge status-${item.value.toLowerCase().replace(" ", "-")}`}
+                            >
+                              {item.value}
+                            </span>
+                          ) : (
+                            <p
+                              style={{
+                                color: "#fff",
+                                fontWeight: 500,
+                                fontSize: "0.9rem",
+                                wordBreak: "break-all",
+                              }}
+                            >
+                              {item.value}
+                            </p>
                           )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* Assembly Hierarchy */}
+                {provenanceData.used_in_assemblies &&
+                  provenanceData.used_in_assemblies.length > 0 && (
+                    <div className="card" style={{ padding: "32px 28px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: 24,
+                        }}
+                      >
+                        <h2
+                          className="syne"
+                          style={{
+                            fontSize: "1.3rem",
+                            fontWeight: 700,
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                          }}
+                        >
+                          <Package
+                            className="w-7 h-7"
+                            style={{ color: "#00C9A7" }}
+                          />
+                          Assembly Hierarchy
+                        </h2>
+                        <button
+                          onClick={() => {
+                            const allNodeIds = new Set();
+                            const collectNodeIds = (
+                              components,
+                              parentId = "root",
+                            ) => {
+                              components.forEach((component) => {
+                                const nodeId = `${parentId}-${component.unit_id}`;
+                                allNodeIds.add(nodeId);
+                                if (component.components) {
+                                  collectNodeIds(component.components, nodeId);
+                                }
+                              });
+                            };
+                            collectNodeIds(provenanceData.used_in_assemblies);
+                            setExpandedNodes(allNodeIds);
+                          }}
+                          className="glass-button"
+                          style={{ fontSize: "0.85rem", padding: "8px 16px" }}
+                        >
+                          Expand All
+                        </button>
+                      </div>
+                      <div
+                        className="provenance-tree"
+                        style={{ overflowX: "auto" }}
+                      >
+                        <div style={{ minWidth: "max-content" }}>
+                          <div className="provenance-node">
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                padding: "16px 20px",
+                                borderRadius: "12px",
+                                background:
+                                  "linear-gradient(135deg, rgba(0, 201, 167, 0.2), rgba(0, 201, 167, 0.1))",
+                              }}
+                            >
+                              <span style={{ fontSize: "1.5rem" }}>📦</span>
+                              <div>
+                                <div
+                                  style={{
+                                    fontWeight: 700,
+                                    fontSize: "1.1rem",
+                                    color: "#fff",
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  {provenanceData.component.serial_number}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "0.9rem",
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  {provenanceData.component.product_name}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "0.8rem",
+                                    color: "rgba(232,237,247,0.6)",
+                                  }}
+                                >
+                                  {provenanceData.component.manufacturer?.name}{" "}
+                                  (
+                                  {
+                                    provenanceData.component.manufacturer
+                                      ?.country
+                                  }
+                                  )
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              marginLeft: 20,
+                              borderLeft: "2px solid rgba(255,255,255,0.1)",
+                              paddingLeft: 20,
+                              marginTop: 16,
+                            }}
+                          >
+                            {renderAssemblyTree(
+                              provenanceData.used_in_assemblies,
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  )}
+
+                {/* Transfer History */}
+                {provenanceData.transfer_history &&
+                  provenanceData.transfer_history.length > 0 && (
+                    <div className="card" style={{ padding: "32px 28px" }}>
+                      <h2
+                        className="syne"
+                        style={{
+                          fontSize: "1.3rem",
+                          fontWeight: 700,
+                          color: "#fff",
+                          marginBottom: 24,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <Truck
+                          className="w-7 h-7"
+                          style={{ color: "#F7A84F" }}
+                        />
+                        Transfer History
+                      </h2>
+                      <div style={{ spaceY: 16 }}>
+                        {provenanceData.transfer_history.map(
+                          (transfer, index) => (
+                            <div key={index} style={{ position: "relative" }}>
+                              {/* Timeline Line */}
+                              {index <
+                                provenanceData.transfer_history.length - 1 && (
+                                <div
+                                  style={{
+                                    position: "absolute",
+                                    left: 24,
+                                    top: 64,
+                                    width: 2,
+                                    height: "100%",
+                                    background: "rgba(255,255,255,0.1)",
+                                  }}
+                                />
+                              )}
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  gap: 16,
+                                  padding: "16px 20px",
+                                  borderRadius: "12px",
+                                  background: "rgba(255,255,255,0.03)",
+                                  border: "1px solid rgba(255,255,255,0.07)",
+                                  transition: "all 0.2s ease",
+                                  hover: {
+                                    background: "rgba(255,255,255,0.05)",
+                                  },
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    flexShrink: 0,
+                                    width: 48,
+                                    height: 48,
+                                    borderRadius: "12px",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    background:
+                                      "linear-gradient(135deg, #4F8EF7, #B06EF7)",
+                                    fontSize: "1.2rem",
+                                    boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                                  }}
+                                >
+                                  {transfer.status === "shipped" && "📤"}
+                                  {transfer.status === "in_transit" && "🚚"}
+                                  {transfer.status === "received" && "📥"}
+                                  {transfer.status === "manufactured" && "🏭"}
+                                  {transfer.status === "quality_check" && "🔍"}
+                                </div>
+
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      sm: {
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                        justifyContent: "space-between",
+                                      },
+                                      gap: 8,
+                                      marginBottom: 12,
+                                    }}
+                                  >
+                                    <span
+                                      className={`status-badge status-${transfer.status}`}
+                                    >
+                                      {transfer.status
+                                        .replace("_", " ")
+                                        .toUpperCase()}
+                                    </span>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        fontSize: "0.85rem",
+                                        color: "rgba(232,237,247,0.4)",
+                                      }}
+                                    >
+                                      <Clock className="w-4 h-4" />
+                                      {new Date(
+                                        transfer.timestamp,
+                                      ).toLocaleString()}
+                                    </div>
+                                  </div>
+
+                                  <div style={{ spaceY: 8 }}>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        sm: {
+                                          flexDirection: "row",
+                                          alignItems: "center",
+                                        },
+                                        gap: 8,
+                                      }}
+                                    >
+                                      {transfer.from?.organization && (
+                                        <>
+                                          <span
+                                            style={{
+                                              color: "#F7A84F",
+                                              fontWeight: 500,
+                                            }}
+                                          >
+                                            {transfer.from.organization}
+                                          </span>
+                                          <ArrowRight
+                                            className="w-4 h-4"
+                                            style={{
+                                              color: "rgba(232,237,247,0.4)",
+                                              display: "none",
+                                              sm: { display: "block" },
+                                            }}
+                                          />
+                                          <span
+                                            style={{
+                                              color: "rgba(232,237,247,0.4)",
+                                              display: "block",
+                                              sm: { display: "none" },
+                                            }}
+                                          >
+                                            →
+                                          </span>
+                                        </>
+                                      )}
+                                      <span
+                                        style={{
+                                          color: "#00C9A7",
+                                          fontWeight: 500,
+                                        }}
+                                      >
+                                        {transfer.to.organization}
+                                      </span>
+                                    </div>
+
+                                    {transfer.location && (
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: 8,
+                                          fontSize: "0.85rem",
+                                          color: "#4F8EF7",
+                                        }}
+                                      >
+                                        <MapPin className="w-4 h-4" />
+                                        {transfer.location.name},{" "}
+                                        {transfer.location.country}
+                                      </div>
+                                    )}
+
+                                    {transfer.tracking_number && (
+                                      <div
+                                        style={{
+                                          fontSize: "0.85rem",
+                                          color: "rgba(232,237,247,0.4)",
+                                          background: "rgba(0,0,0,0.2)",
+                                          padding: "4px 12px",
+                                          borderRadius: "50px",
+                                          display: "inline-block",
+                                        }}
+                                      >
+                                        📦 Tracking: {transfer.tracking_number}
+                                      </div>
+                                    )}
+
+                                    {transfer.notes && (
+                                      <div
+                                        style={{
+                                          fontSize: "0.85rem",
+                                          color: "rgba(232,237,247,0.6)",
+                                          fontStyle: "italic",
+                                          marginTop: 8,
+                                        }}
+                                      >
+                                        "{transfer.notes}"
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                {/* Status History */}
+                {provenanceData.status_history &&
+                  provenanceData.status_history.length > 0 && (
+                    <div className="card" style={{ padding: "32px 28px" }}>
+                      <h2
+                        className="syne"
+                        style={{
+                          fontSize: "1.3rem",
+                          fontWeight: 700,
+                          color: "#fff",
+                          marginBottom: 24,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <Clock
+                          className="w-7 h-7"
+                          style={{ color: "#B06EF7" }}
+                        />
+                        Status History
+                      </h2>
+                      <div style={{ spaceY: 12 }}>
+                        {provenanceData.status_history.map((status, index) => (
+                          <div
+                            key={index}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 16,
+                              padding: "16px 20px",
+                              borderRadius: "12px",
+                              background: "rgba(255,255,255,0.03)",
+                              border: "1px solid rgba(255,255,255,0.07)",
+                              transition: "all 0.2s ease",
+                              hover: { background: "rgba(255,255,255,0.05)" },
+                            }}
+                          >
+                            <div style={{ flexShrink: 0 }}>
+                              {status.from && (
+                                <span
+                                  className={`status-badge status-${status.from}`}
+                                >
+                                  {status.from}
+                                </span>
+                              )}
+                            </div>
+                            <ArrowRight
+                              className="w-5 h-5"
+                              style={{
+                                color: "rgba(232,237,247,0.4)",
+                                flexShrink: 0,
+                              }}
+                            />
+                            <div style={{ flexShrink: 0 }}>
+                              <span
+                                className={`status-badge status-${status.to}`}
+                              >
+                                {status.to}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                flex: 1,
+                                textAlign: "right",
+                                minWidth: 0,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  sm: {
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    justifyContent: "flex-end",
+                                  },
+                                  gap: 8,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    fontSize: "0.85rem",
+                                    color: "rgba(232,237,247,0.4)",
+                                  }}
+                                >
+                                  {new Date(status.timestamp).toLocaleString()}
+                                </div>
+                                {status.changed_by_name && (
+                                  <div
+                                    style={{
+                                      fontSize: "0.8rem",
+                                      color: "rgba(232,237,247,0.4)",
+                                    }}
+                                  >
+                                    by {status.changed_by_name}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                {/* Summary */}
+                {provenanceData.summary && (
+                  <div className="card" style={{ padding: "32px 28px" }}>
+                    <h2
+                      className="syne"
+                      style={{
+                        fontSize: "1.3rem",
+                        fontWeight: 700,
+                        color: "#fff",
+                        marginBottom: 24,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <Package
+                        className="w-7 h-7"
+                        style={{ color: "#4F8EF7" }}
+                      />
+                      Summary
+                    </h2>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(200px, 1fr))",
+                        gap: 20,
+                      }}
+                    >
+                      {[
+                        {
+                          label: "Total Assemblies",
+                          value: provenanceData.summary.total_assemblies,
+                          color: "#4F8EF7",
+                        },
+                        {
+                          label: "Direct Assemblies",
+                          value: provenanceData.summary.direct_assemblies,
+                          color: "#00C9A7",
+                        },
+                        {
+                          label: "Transfers",
+                          value: provenanceData.summary.transfer_count,
+                          color: "#F7A84F",
+                        },
+                        {
+                          label: "Status Changes",
+                          value: provenanceData.summary.status_changes,
+                          color: "#B06EF7",
+                        },
+                        {
+                          label: "Max Assembly Level",
+                          value: provenanceData.summary.max_assembly_level,
+                          color: "#F74F4F",
+                        },
+                      ].map((stat, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            textAlign: "center",
+                            padding: "20px 16px",
+                            borderRadius: "12px",
+                            background: `linear-gradient(135deg, ${stat.color + "18"}, ${stat.color + "10"})`,
+                            border: `1px solid ${stat.color + "30"}`,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "1.8rem",
+                              fontWeight: 700,
+                              color: stat.color,
+                              marginBottom: 8,
+                            }}
+                          >
+                            {stat.value}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.85rem",
+                              color: "rgba(232,237,247,0.7)",
+                            }}
+                          >
+                            {stat.label}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
-
-          {/* Summary */}
-          <div className="glass-card p-6 md:p-8">
-            <h2 className="text-2xl md:text-3xl font-bold text-white mb-6 flex items-center space-x-3">
-              <Package className="w-8 h-8 text-indigo-400" />
-              <span>Summary</span>
-            </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
-              <div className="text-center p-4 bg-gradient-to-br from-blue-500 to-blue-600 bg-opacity-20 rounded-lg">
-                <div className="text-2xl md:text-3xl font-bold text-blue-300 mb-2">
-                  {provenanceData.summary.total_components}
-                </div>
-                <div className="text-sm text-gray-300">Total Components</div>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-green-500 to-green-600 bg-opacity-20 rounded-lg">
-                <div className="text-2xl md:text-3xl font-bold text-green-300 mb-2">
-                  {provenanceData.summary.direct_components}
-                </div>
-                <div className="text-sm text-gray-300">Direct Components</div>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-orange-500 to-orange-600 bg-opacity-20 rounded-lg">
-                <div className="text-2xl md:text-3xl font-bold text-orange-300 mb-2">
-                  {provenanceData.summary.transfer_count}
-                </div>
-                <div className="text-sm text-gray-300">Transfers</div>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-purple-500 to-purple-600 bg-opacity-20 rounded-lg">
-                <div className="text-2xl md:text-3xl font-bold text-purple-300 mb-2">
-                  {provenanceData.summary.status_changes}
-                </div>
-                <div className="text-sm text-gray-300">Status Changes</div>
-              </div>
-              <div className="text-center p-4 bg-gradient-to-br from-pink-500 to-pink-600 bg-opacity-20 rounded-lg">
-                <div className="text-2xl md:text-3xl font-bold text-pink-300 mb-2">
-                  {provenanceData.summary.deepest_component_level}
-                </div>
-                <div className="text-sm text-gray-300">Deepest Level</div>
-              </div>
-            </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

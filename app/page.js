@@ -65,6 +65,7 @@ export default function HomePage() {
   const handleSearch = async () => {
     if (!searchTerm.trim()) return;
     setIsSearching(true);
+    setShowResults(false);
     try {
       const [productsResponse, unitsResponse, orgsResponse] = await Promise.all(
         [
@@ -79,24 +80,73 @@ export default function HomePage() {
           ),
         ],
       );
-      const [products, units, organizations] = await Promise.all([
-        productsResponse.json(),
-        unitsResponse.json(),
-        orgsResponse.json(),
-      ]);
+
+      // Check each response individually and handle errors
+      let productsData = [];
+      let unitsData = [];
+      let orgsData = [];
+
+      try {
+        if (productsResponse.ok) {
+          const products = await productsResponse.json();
+          productsData = Array.isArray(products) ? products : [];
+        } else {
+          console.error(
+            "Products API failed:",
+            productsResponse.status,
+            productsResponse.statusText,
+          );
+        }
+      } catch (error) {
+        console.error("Error parsing products response:", error);
+      }
+
+      try {
+        if (unitsResponse.ok) {
+          const units = await unitsResponse.json();
+          unitsData = Array.isArray(units) ? units : [];
+        } else {
+          console.error(
+            "Units API failed:",
+            unitsResponse.status,
+            unitsResponse.statusText,
+          );
+        }
+      } catch (error) {
+        console.error("Error parsing units response:", error);
+      }
+
+      try {
+        if (orgsResponse.ok) {
+          const organizations = await orgsResponse.json();
+          orgsData = Array.isArray(organizations) ? organizations : [];
+        } else {
+          console.error(
+            "Organizations API failed:",
+            orgsResponse.status,
+            orgsResponse.statusText,
+          );
+        }
+      } catch (error) {
+        console.error("Error parsing organizations response:", error);
+      }
+
       const combinedResults = [
-        ...products.map((p) => ({ ...p, type: "product", icon: "📦" })),
-        ...units.map((u) => ({ ...u, type: "unit", icon: "🏷️" })),
-        ...organizations.map((o) => ({
+        ...productsData.map((p) => ({ ...p, type: "product", icon: "📦" })),
+        ...unitsData.map((u) => ({ ...u, type: "unit", icon: "🏷️" })),
+        ...orgsData.map((o) => ({
           ...o,
           type: "organization",
           icon: "🏢",
         })),
       ];
+
       setSearchResults(combinedResults);
       setShowResults(true);
     } catch (error) {
       console.error("Search failed:", error);
+      setSearchResults([]);
+      setShowResults(true);
     } finally {
       setIsSearching(false);
     }
@@ -786,77 +836,96 @@ export default function HomePage() {
               </div>
 
               {/* Search Results */}
-              {showResults && searchResults.length > 0 && (
+              {showResults && (
                 <div className="results-panel" style={{ marginTop: 12 }}>
-                  <div
-                    style={{
-                      padding: "12px 20px 8px",
-                      borderBottom: "1px solid rgba(255,255,255,0.05)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "0.8rem",
-                        color: "rgba(232,237,247,0.4)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {searchResults.length} results found
-                    </span>
-                  </div>
-                  {searchResults.map((result, index) => (
-                    <div
-                      key={index}
-                      className="result-item"
-                      onClick={() => handleResultClick(result)}
-                    >
+                  {searchResults.length > 0 ? (
+                    <>
                       <div
                         style={{
-                          width: 38,
-                          height: 38,
-                          background: "rgba(255,255,255,0.04)",
-                          borderRadius: 10,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "1rem",
-                          flexShrink: 0,
+                          padding: "12px 20px 8px",
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
                         }}
                       >
-                        {result.icon}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div
+                        <span
                           style={{
-                            color: "#E8EDF7",
-                            fontWeight: 500,
-                            fontSize: "0.9rem",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {result.product_name ||
-                            result.serial_number ||
-                            result.org_name}
-                        </div>
-                        <div
-                          style={{
+                            fontSize: "0.8rem",
                             color: "rgba(232,237,247,0.4)",
-                            fontSize: "0.78rem",
-                            marginTop: 2,
+                            fontWeight: 500,
                           }}
                         >
-                          {result.type === "product" && `SKU: ${result.sku}`}
-                          {result.type === "unit" &&
-                            `Serial: ${result.serial_number}`}
-                          {result.type === "organization" &&
-                            `${result.org_type} · ${result.country}`}
-                        </div>
+                          {searchResults.length} results found
+                        </span>
                       </div>
-                      <ArrowRight size={15} color="rgba(232,237,247,0.25)" />
+                      {searchResults.map((result, index) => (
+                        <div
+                          key={index}
+                          className="result-item"
+                          onClick={() => handleResultClick(result)}
+                        >
+                          <div
+                            style={{
+                              width: 38,
+                              height: 38,
+                              background: "rgba(255,255,255,0.04)",
+                              borderRadius: 10,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "1rem",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {result.icon}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div
+                              style={{
+                                color: "#E8EDF7",
+                                fontWeight: 500,
+                                fontSize: "0.9rem",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {result.product_name ||
+                                result.serial_number ||
+                                result.org_name}
+                            </div>
+                            <div
+                              style={{
+                                color: "rgba(232,237,247,0.4)",
+                                fontSize: "0.78rem",
+                                marginTop: 2,
+                              }}
+                            >
+                              {result.type === "product" &&
+                                `SKU: ${result.sku}`}
+                              {result.type === "unit" &&
+                                `Serial: ${result.serial_number}`}
+                              {result.type === "organization" &&
+                                `${result.org_type} · ${result.country}`}
+                            </div>
+                          </div>
+                          <ArrowRight
+                            size={15}
+                            color="rgba(232,237,247,0.25)"
+                          />
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div
+                      style={{
+                        padding: "40px 20px",
+                        textAlign: "center",
+                        color: "rgba(232,237,247,0.4)",
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      No results found for "{searchTerm}"
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>

@@ -5,18 +5,42 @@ export async function POST(req) {
   try {
     const body = await req.json();
     const {
-      component_serial_number,
+      serial_number,
+      trace_depth = "full",
       include_assemblies = true,
       max_depth = 10,
       include_transfers = true,
       include_status_history = true,
     } = body;
 
-    if (!component_serial_number) {
+    if (!serial_number) {
       return NextResponse.json(
-        { error: "Component serial number is required" },
+        { error: "Serial number is required" },
         { status: 400 },
       );
+    }
+
+    // Adjust parameters based on trace_depth
+    let finalIncludeAssemblies = include_assemblies;
+    let finalIncludeTransfers = include_transfers;
+    let finalIncludeStatusHistory = include_status_history;
+    let finalMaxDepth = max_depth;
+
+    if (trace_depth === "basic") {
+      finalIncludeAssemblies = false;
+      finalIncludeTransfers = true;
+      finalIncludeStatusHistory = false;
+      finalMaxDepth = 2;
+    } else if (trace_depth === "standard") {
+      finalIncludeAssemblies = true;
+      finalIncludeTransfers = true;
+      finalIncludeStatusHistory = true;
+      finalMaxDepth = 5;
+    } else if (trace_depth === "full") {
+      finalIncludeAssemblies = true;
+      finalIncludeTransfers = true;
+      finalIncludeStatusHistory = true;
+      finalMaxDepth = 10;
     }
 
     // Find the component unit
@@ -28,7 +52,7 @@ export async function POST(req) {
        LEFT JOIN product_catalog pc ON pu.catalog_id = pc.catalog_id
        LEFT JOIN organizations org ON pu.manufacturer_org_id = org.org_id
        WHERE pu.serial_number = ?`,
-      [component_serial_number],
+      [serial_number],
     );
 
     if (componentCheck.length === 0) {
@@ -94,7 +118,7 @@ export async function POST(req) {
 
     // Get transfer history for this component
     let transferHistory = [];
-    if (include_transfers) {
+    if (finalIncludeTransfers) {
       const [transfers] = await pool.execute(
         `
         SELECT tl.transfer_time, tl.status, tl.tracking_number, tl.notes,
@@ -115,7 +139,7 @@ export async function POST(req) {
 
     // Get status history for this component
     let statusHistory = [];
-    if (include_status_history) {
+    if (finalIncludeStatusHistory) {
       const [statusChanges] = await pool.execute(
         `
         SELECT psh.old_status, psh.new_status, psh.timestamp,
@@ -163,7 +187,7 @@ export async function POST(req) {
       }));
     };
 
-    const assemblyTree = include_assemblies
+    const assemblyTree = finalIncludeAssemblies
       ? buildAssemblyTree(assemblyTrace)
       : [];
 
@@ -224,6 +248,7 @@ export async function POST(req) {
 
     return NextResponse.json(traceData);
   } catch (error) {
+    console.error("Provenance trace error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

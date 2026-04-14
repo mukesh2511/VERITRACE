@@ -52,15 +52,9 @@ export async function GET(req) {
 
     const [rows] = await pool.execute(query, params);
 
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { message: "No product units found" },
-        { status: 404 },
-      );
-    }
-
     return NextResponse.json(rows);
   } catch (error) {
+    console.error("Products units API error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

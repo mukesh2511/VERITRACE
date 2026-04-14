@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 export async function GET(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Get BOM details
     const [bomRows] = await pool.execute(
@@ -66,7 +66,7 @@ export async function GET(req, { params }) {
 
 export async function PUT(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const body = await req.json();
     const { version } = body;
 

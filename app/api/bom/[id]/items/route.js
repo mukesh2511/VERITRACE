@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 export async function GET(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Check if BOM exists
     const [bomCheck] = await pool.execute(
@@ -49,7 +49,7 @@ export async function GET(req, { params }) {
 
 export async function POST(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
     const body = await req.json();
     const { component_catalog_id, quantity } = body;
 

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 export async function GET(req, { params }) {
   try {
-    const { serial } = params;
+    const { serial } = await params;
 
     // First, get the basic product unit information
     const [unitCheck] = await pool.execute(

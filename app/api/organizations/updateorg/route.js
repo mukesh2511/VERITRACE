@@ -1,11 +1,20 @@
 import pool from "../../../../config/db";
 import { NextResponse } from "next/server";
 
-export async function PUT(req, { params }) {
+export async function PUT(req) {
   try {
-    const { id } = params;
     const body = await req.json();
-    const { org_name, org_type, country } = body;
+    const { id, org_name, org_type, country, contact_email, phone, address } =
+      body;
+    console.log("Received data:", body);
+    parseInt(id);
+
+    if (!id || isNaN(id)) {
+      return NextResponse.json(
+        { message: "Invalid organization ID" },
+        { status: 400 },
+      );
+    }
 
     const [rows] = await pool.execute(
       "SELECT * FROM organizations WHERE org_id = ?",
@@ -20,8 +29,16 @@ export async function PUT(req, { params }) {
     }
 
     await pool.execute(
-      "UPDATE organizations SET org_name=?, org_type=?, country=? WHERE org_id=?",
-      [org_name, org_type, country, id],
+      "UPDATE organizations SET org_name=?, org_type=?, country=?, contact_email=?, phone=?, address=? WHERE org_id=?",
+      [
+        org_name || rows[0].org_name,
+        org_type || rows[0].org_type,
+        country || rows[0].country,
+        contact_email || rows[0].contact_email,
+        phone || rows[0].phone,
+        address || rows[0].address,
+        id,
+      ],
     );
 
     return NextResponse.json({
