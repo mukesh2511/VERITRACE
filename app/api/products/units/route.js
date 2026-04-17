@@ -18,7 +18,7 @@ export async function GET(req) {
              l.location_name as current_location_name
       FROM product_unit pu
       LEFT JOIN product_catalog pc ON pu.catalog_id = pc.catalog_id
-      LEFT JOIN organizations mo ON pu.manufacturer_org_id = mo.org_id
+      LEFT JOIN organizations mo ON pu.manufacturer_org_id = mo.org_id  
       LEFT JOIN locations l ON pu.current_location_id = l.location_id
       WHERE 1=1
     `;

@@ -1,14 +1,14 @@
-import pool from "../../../../config/db";
+import pool from "../../../config/db";
 import { NextResponse } from "next/server";
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const buyer_org_id = searchParams.get('buyer_org_id');
-    const supplier_org_id = searchParams.get('supplier_org_id');
-    const order_status = searchParams.get('order_status');
-    const start_date = searchParams.get('start_date');
-    const end_date = searchParams.get('end_date');
+    const buyer_org_id = searchParams.get("buyer_org_id");
+    const supplier_org_id = searchParams.get("supplier_org_id");
+    const order_status = searchParams.get("order_status");
+    const start_date = searchParams.get("start_date");
+    const end_date = searchParams.get("end_date");
 
     let query = `
       SELECT po.*,
@@ -58,7 +58,7 @@ export async function GET(req) {
     if (rows.length === 0) {
       return NextResponse.json(
         { message: "No purchase orders found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -71,32 +71,46 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { 
-      buyer_org_id, 
-      supplier_org_id, 
-      order_status = 'pending',
-      items 
+    const {
+      buyer_org_id,
+      supplier_org_id,
+      order_status = "pending",
+      items,
     } = body;
 
     // Validation checks
-    if (!buyer_org_id || !supplier_org_id || !items || !Array.isArray(items) || items.length === 0) {
+    if (
+      !buyer_org_id ||
+      !supplier_org_id ||
+      !items ||
+      !Array.isArray(items) ||
+      items.length === 0
+    ) {
       return NextResponse.json(
-        { error: "Missing required fields: buyer_org_id, supplier_org_id, items (array)" },
-        { status: 400 }
+        {
+          error:
+            "Missing required fields: buyer_org_id, supplier_org_id, items (array)",
+        },
+        { status: 400 },
       );
     }
 
     if (buyer_org_id === supplier_org_id) {
       return NextResponse.json(
         { error: "Buyer and supplier cannot be the same organization" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    if (!['pending', 'accepted', 'completed', 'cancelled'].includes(order_status)) {
+    if (
+      !["pending", "accepted", "completed", "cancelled"].includes(order_status)
+    ) {
       return NextResponse.json(
-        { error: "Invalid order_status. Must be pending, accepted, completed, or cancelled" },
-        { status: 400 }
+        {
+          error:
+            "Invalid order_status. Must be pending, accepted, completed, or cancelled",
+        },
+        { status: 400 },
       );
     }
 
@@ -105,7 +119,7 @@ export async function POST(req) {
       if (!item.catalog_id || !item.quantity || item.quantity < 1) {
         return NextResponse.json(
           { error: "Each item must have catalog_id and quantity (>= 1)" },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
@@ -113,41 +127,41 @@ export async function POST(req) {
     // Check if buyer organization exists
     const [buyerCheck] = await pool.execute(
       "SELECT org_id FROM organizations WHERE org_id = ?",
-      [buyer_org_id]
+      [buyer_org_id],
     );
 
     if (buyerCheck.length === 0) {
       return NextResponse.json(
         { error: "Buyer organization not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
     // Check if supplier organization exists
     const [supplierCheck] = await pool.execute(
       "SELECT org_id FROM organizations WHERE org_id = ?",
-      [supplier_org_id]
+      [supplier_org_id],
     );
 
     if (supplierCheck.length === 0) {
       return NextResponse.json(
         { error: "Supplier organization not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
     // Validate all catalog IDs
-    const catalogIds = items.map(item => item.catalog_id);
+    const catalogIds = items.map((item) => item.catalog_id);
     const [catalogCheck] = await pool.execute(
       `SELECT catalog_id, product_name FROM product_catalog 
-       WHERE catalog_id IN (${catalogIds.map(() => '?').join(',')})`,
-      catalogIds
+       WHERE catalog_id IN (${catalogIds.map(() => "?").join(",")})`,
+      catalogIds,
     );
 
     if (catalogCheck.length !== catalogIds.length) {
       return NextResponse.json(
         { error: "One or more product catalogs not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -155,30 +169,36 @@ export async function POST(req) {
     const [orderResult] = await pool.execute(
       `INSERT INTO purchase_orders (buyer_org_id, supplier_org_id, order_status) 
        VALUES (?, ?, ?)`,
-      [buyer_org_id, supplier_org_id, order_status]
+      [buyer_org_id, supplier_org_id, order_status],
     );
 
     const order_id = orderResult.insertId;
 
     // Create purchase order items
-    const itemValues = items.map(item => [order_id, item.catalog_id, item.quantity]);
-    
+    const itemValues = items.map((item) => [
+      order_id,
+      item.catalog_id,
+      item.quantity,
+    ]);
+
     for (const [order_id, catalog_id, quantity] of itemValues) {
       await pool.execute(
         "INSERT INTO purchase_order_items (order_id, catalog_id, quantity) VALUES (?, ?, ?)",
-        [order_id, catalog_id, quantity]
+        [order_id, catalog_id, quantity],
       );
     }
 
-    return NextResponse.json({
-      message: "Purchase order created successfully",
-      order_id: order_id,
-      buyer_org_id: buyer_org_id,
-      supplier_org_id: supplier_org_id,
-      order_status: order_status,
-      items_count: items.length
-    }, { status: 201 });
-
+    return NextResponse.json(
+      {
+        message: "Purchase order created successfully",
+        order_id: order_id,
+        buyer_org_id: buyer_org_id,
+        supplier_org_id: supplier_org_id,
+        order_status: order_status,
+        items_count: items.length,
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

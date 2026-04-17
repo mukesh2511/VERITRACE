@@ -1,12 +1,12 @@
-import pool from "../../../../config/db";
+import pool from "../../../config/db";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
 export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
-    const org_id = searchParams.get('org_id');
-    const role = searchParams.get('role');
+    const org_id = searchParams.get("org_id");
+    const role = searchParams.get("role");
 
     let query = `
       SELECT u.user_id, u.org_id, u.name, u.email, u.role, 
@@ -33,10 +33,7 @@ export async function GET(req) {
     const [rows] = await pool.execute(query, params);
 
     if (rows.length === 0) {
-      return NextResponse.json(
-        { message: "No users found" },
-        { status: 404 }
-      );
+      return NextResponse.json({ message: "No users found" }, { status: 404 });
     }
 
     return NextResponse.json(rows);
@@ -53,55 +50,57 @@ export async function POST(req) {
     // Validation checks
     if (!org_id || !name || !email || !password || !role) {
       return NextResponse.json(
-        { error: "Missing required fields: org_id, name, email, password, role" },
-        { status: 400 }
+        {
+          error: "Missing required fields: org_id, name, email, password, role",
+        },
+        { status: 400 },
       );
     }
 
-    if (!['admin', 'manager', 'operator'].includes(role)) {
+    if (!["admin", "manager", "operator"].includes(role)) {
       return NextResponse.json(
         { error: "Invalid role. Must be admin, manager, or operator" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (name.length > 255) {
       return NextResponse.json(
         { error: "Name must be less than 255 characters" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (email.length > 255) {
       return NextResponse.json(
         { error: "Email must be less than 255 characters" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // Check if organization exists
     const [orgCheck] = await pool.execute(
       "SELECT org_id FROM organizations WHERE org_id = ?",
-      [org_id]
+      [org_id],
     );
 
     if (orgCheck.length === 0) {
       return NextResponse.json(
         { error: "Organization not found" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
     // Check if email already exists
     const [emailCheck] = await pool.execute(
       "SELECT user_id FROM users WHERE email = ?",
-      [email]
+      [email],
     );
 
     if (emailCheck.length > 0) {
       return NextResponse.json(
         { error: "Email already exists" },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -112,17 +111,19 @@ export async function POST(req) {
     const [result] = await pool.execute(
       `INSERT INTO users (org_id, name, email, password_hash, role, phone) 
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [org_id, name, email, password_hash, role, phone || null]
+      [org_id, name, email, password_hash, role, phone || null],
     );
 
-    return NextResponse.json({
-      message: "User created successfully",
-      user_id: result.insertId,
-      email: email,
-      name: name,
-      role: role
-    }, { status: 201 });
-
+    return NextResponse.json(
+      {
+        message: "User created successfully",
+        user_id: result.insertId,
+        email: email,
+        name: name,
+        role: role,
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
