@@ -9,6 +9,7 @@ export async function GET(req) {
     const status = searchParams.get("status");
     const serial_number = searchParams.get("serial_number");
     const batch_number = searchParams.get("batch_number");
+    const product_name = searchParams.get("product_name");
 
     let query = `
       SELECT pu.*, 
@@ -46,6 +47,11 @@ export async function GET(req) {
     if (batch_number) {
       query += " AND pu.batch_number LIKE ?";
       params.push(`%${batch_number}%`);
+    }
+
+    if (product_name) {
+      query += " AND pc.product_name LIKE ?";
+      params.push(`%${product_name}%`);
     }
 
     query += " ORDER BY pu.created_at DESC";

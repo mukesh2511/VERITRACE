@@ -1,4 +1,4 @@
-import pool from "../../../../../../config/db";
+import pool from "../../../../../config/db";
 import { NextResponse } from "next/server";
 
 export async function GET(req, { params }) {
@@ -166,7 +166,7 @@ export async function PUT(req, { params }) {
 
 export async function DELETE(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Check if product exists
     const [productCheck] = await pool.execute(
@@ -178,26 +178,64 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
-    // Check if product has associated units
-    const [unitsCheck] = await pool.execute(
-      "SELECT COUNT(*) as count FROM product_unit WHERE catalog_id = ?",
-      [id],
-    );
+    // Start transaction for cascade delete
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    if (unitsCheck[0].count > 0) {
-      return NextResponse.json(
-        { error: "Cannot delete product with existing product units" },
-        { status: 400 },
+    try {
+      // Get all product units for this product to delete their related data
+      const [productUnits] = await connection.execute(
+        "SELECT unit_id FROM product_unit WHERE catalog_id = ?",
+        [id],
       );
+
+      const unitIds = productUnits.map((unit) => unit.unit_id);
+
+      // Delete transfer logs for all units of this product
+      if (unitIds.length > 0) {
+        const placeholders = unitIds.map(() => "?").join(",");
+        await connection.execute(
+          `DELETE FROM transfer_log WHERE unit_id IN (${placeholders})`,
+          unitIds,
+        );
+
+        // Delete assembly relationships where these units are parents or children
+        await connection.execute(
+          `DELETE FROM assembly_relationship WHERE parent_unit_id IN (${placeholders}) OR child_unit_id IN (${placeholders})`,
+          [...unitIds, ...unitIds],
+        );
+
+        // Delete status history for all units
+        await connection.execute(
+          `DELETE FROM product_status_history WHERE unit_id IN (${placeholders})`,
+          unitIds,
+        );
+
+        // Delete the product units
+        await connection.execute(
+          `DELETE FROM product_unit WHERE unit_id IN (${placeholders})`,
+          unitIds,
+        );
+      }
+
+      // Finally delete the product catalog entry
+      await connection.execute(
+        "DELETE FROM product_catalog WHERE catalog_id = ?",
+        [id],
+      );
+
+      await connection.commit();
+
+      return NextResponse.json({
+        message: "Product and all related data deleted successfully",
+        deleted_units_count: unitIds.length,
+      });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-
-    await pool.execute("DELETE FROM product_catalog WHERE catalog_id = ?", [
-      id,
-    ]);
-
-    return NextResponse.json({
-      message: "Product deleted successfully",
-    });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

@@ -16,6 +16,9 @@ import {
 export default function ProvenancePage() {
   const [serialNumber, setSerialNumber] = useState("");
   const [provenanceData, setProvenanceData] = useState(null);
+  const [productUnits, setProductUnits] = useState([]);
+  const [allTransfers, setAllTransfers] = useState([]);
+  const [allAssemblies, setAllAssemblies] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expandedNodes, setExpandedNodes] = useState(new Set());
@@ -36,8 +39,13 @@ export default function ProvenancePage() {
 
     setLoading(true);
     setError("");
+    setProvenanceData(null);
+    setProductUnits([]);
+    setAllTransfers([]);
+    setAllAssemblies([]);
 
     try {
+      // First, get provenance data for the searched serial number
       const response = await fetch("/api/provenance/trace", {
         method: "POST",
         headers: {
@@ -55,25 +63,113 @@ export default function ProvenancePage() {
 
       if (response.ok) {
         setProvenanceData(data);
-        // Update search history
-        const newHistory = [
-          serialNumber.trim(),
-          ...searchHistory.filter((s) => s !== serialNumber.trim()),
-        ].slice(0, 5);
-        setSearchHistory(newHistory);
-        localStorage.setItem(
-          "provenanceSearchHistory",
-          JSON.stringify(newHistory),
+        console.log("Provenance data:", data);
+
+        // Get all units of the same product
+        const unitsResponse = await fetch(
+          `/api/products/units?catalog_id=${data.component.catalog_id}`,
         );
+        const unitsData = await unitsResponse.json();
+        console.log("Units response:", unitsResponse);
+        console.log("Units data:", unitsData);
+
+        if (unitsResponse.ok) {
+          console.log("Units data received:", unitsData);
+          if (unitsData.length > 0) {
+            setProductUnits(unitsData);
+            console.log("Set product units:", unitsData.length);
+
+            // Get transfers for all units
+            const transferPromises = unitsData.map((unit) =>
+              fetch(`/api/transfers?unit_id=${unit.unit_id}`),
+            );
+            const transferResponses = await Promise.all(transferPromises);
+            const allTransferData = [];
+
+            for (let i = 0; i < transferResponses.length; i++) {
+              if (transferResponses[i].ok) {
+                const transfers = await transferResponses[i].json();
+                console.log(
+                  `Transfers for unit ${unitsData[i].serial_number}:`,
+                  transfers,
+                );
+                if (Array.isArray(transfers)) {
+                  allTransferData.push(
+                    ...transfers.map((t) => ({
+                      ...t,
+                      unit_serial: unitsData[i].serial_number,
+                    })),
+                  );
+                }
+              } else {
+                console.log(
+                  `Failed to get transfers for unit ${unitsData[i].serial_number}:`,
+                  transferResponses[i].status,
+                );
+              }
+            }
+            console.log("All transfer data:", allTransferData);
+            setAllTransfers(allTransferData);
+
+            // Get assembly info for all units
+            const assemblyPromises = unitsData.map((unit) =>
+              fetch("/api/provenance/trace", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  serial_number: unit.serial_number,
+                  trace_depth: "full",
+                  include_assemblies: true,
+                  include_transfers: false,
+                  include_status_history: false,
+                }),
+              }),
+            );
+            const assemblyResponses = await Promise.all(assemblyPromises);
+            const allAssemblyData = [];
+
+            for (let i = 0; i < assemblyResponses.length; i++) {
+              if (assemblyResponses[i].ok) {
+                const assemblyData = await assemblyResponses[i].json();
+                console.log(
+                  `Assembly data for unit ${unitsData[i].serial_number}:`,
+                  assemblyData,
+                );
+                allAssemblyData.push({
+                  unit: unitsData[i],
+                  assemblies: assemblyData.used_in_assemblies || [],
+                });
+              } else {
+                console.log(
+                  `Failed to get assembly data for unit ${unitsData[i].serial_number}:`,
+                  assemblyResponses[i].status,
+                );
+              }
+            }
+            console.log("All assembly data:", allAssemblyData);
+            setAllAssemblies(allAssemblyData);
+          } else {
+            console.log("No units found for this product");
+          }
+        } else {
+          console.log("Failed to get units:", unitsResponse.status);
+        }
       } else {
         setError(data.error || "Product not found");
-        setProvenanceData(null);
       }
-    } catch (err) {
-      setError(
-        "Failed to fetch provenance data. Please check your connection.",
+
+      // Update search history
+      const newHistory = [
+        serialNumber.trim(),
+        ...searchHistory.filter((s) => s !== serialNumber.trim()),
+      ].slice(0, 5);
+      setSearchHistory(newHistory);
+      localStorage.setItem(
+        "provenanceSearchHistory",
+        JSON.stringify(newHistory),
       );
-      setProvenanceData(null);
+    } catch (err) {
+      setError("Failed to fetch data. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -535,6 +631,412 @@ export default function ProvenancePage() {
             </div>
 
             {/* ─── RESULTS ─── */}
+
+            {/* Product Units Information */}
+            {productUnits.length > 0 && (
+              <div style={{ spaceY: 32 }} className="fade-up delay-2">
+                {/* Product Units Summary */}
+                <div className="card" style={{ padding: "32px 28px" }}>
+                  <div style={{ marginBottom: 24 }}>
+                    <h2
+                      className="syne"
+                      style={{
+                        fontSize: "1.3rem",
+                        fontWeight: 700,
+                        color: "#fff",
+                        marginBottom: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <Package
+                        className="w-7 h-7"
+                        style={{ color: "#4F8EF7" }}
+                      />
+                      All Units for This Product
+                    </h2>
+                    <p
+                      style={{
+                        fontSize: "1rem",
+                        color: "rgba(232,237,247,0.6)",
+                        marginBottom: 16,
+                      }}
+                    >
+                      Found {productUnits.length} units for "
+                      {provenanceData?.component?.product_name ||
+                        "this product"}
+                      "
+                    </p>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(300px, 1fr))",
+                      gap: 16,
+                    }}
+                  >
+                    {productUnits.map((unit, index) => (
+                      <div
+                        key={unit.unit_id}
+                        style={{
+                          padding: "16px",
+                          borderRadius: "12px",
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.07)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "1rem",
+                            fontWeight: 600,
+                            color: "#fff",
+                            marginBottom: 8,
+                          }}
+                        >
+                          {unit.serial_number}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "rgba(232,237,247,0.7)",
+                            marginBottom: 4,
+                          }}
+                        >
+                          {unit.product_name}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "rgba(232,237,247,0.5)",
+                          }}
+                        >
+                          Status:{" "}
+                          <span style={{ color: "#00C9A7" }}>
+                            {unit.status}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "rgba(232,237,247,0.5)",
+                          }}
+                        >
+                          Manufacturer: {unit.manufacturer_name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* All Transfers for Product Units */}
+                {allTransfers.length > 0 && (
+                  <div className="card" style={{ padding: "32px 28px" }}>
+                    <h2
+                      className="syne"
+                      style={{
+                        fontSize: "1.3rem",
+                        fontWeight: 700,
+                        color: "#fff",
+                        marginBottom: 24,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <Truck className="w-7 h-7" style={{ color: "#F7A84F" }} />
+                      All Transfer History ({allTransfers.length} transfers)
+                    </h2>
+                    <div style={{ spaceY: 16 }}>
+                      {allTransfers
+                        .sort(
+                          (a, b) =>
+                            new Date(b.transfer_time) -
+                            new Date(a.transfer_time),
+                        )
+                        .map((transfer, index) => (
+                          <div key={index} style={{ position: "relative" }}>
+                            {/* Timeline Line */}
+                            {index < allTransfers.length - 1 && (
+                              <div
+                                style={{
+                                  position: "absolute",
+                                  left: 24,
+                                  top: 64,
+                                  width: 2,
+                                  height: "100%",
+                                  background: "rgba(255,255,255,0.1)",
+                                }}
+                              />
+                            )}
+
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: 16,
+                                padding: "16px 20px",
+                                borderRadius: "12px",
+                                background: "rgba(255,255,255,0.03)",
+                                border: "1px solid rgba(255,255,255,0.07)",
+                                transition: "all 0.2s ease",
+                                hover: {
+                                  background: "rgba(255,255,255,0.05)",
+                                },
+                              }}
+                            >
+                              <div
+                                style={{
+                                  flexShrink: 0,
+                                  width: 48,
+                                  height: 48,
+                                  borderRadius: "12px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  background:
+                                    "linear-gradient(135deg, #4F8EF7, #B06EF7)",
+                                  fontSize: "1.2rem",
+                                  boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                                }}
+                              >
+                                {transfer.status === "shipped" && "📤"}
+                                {transfer.status === "in_transit" && "🚚"}
+                                {transfer.status === "received" && "📥"}
+                                {transfer.status === "manufactured" && "🏭"}
+                                {transfer.status === "quality_check" && "🔍"}
+                              </div>
+
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    sm: {
+                                      flexDirection: "row",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                    },
+                                    gap: 8,
+                                    marginBottom: 12,
+                                  }}
+                                >
+                                  <span
+                                    className={`status-badge status-${transfer.status}`}
+                                  >
+                                    {transfer.status
+                                      .replace("_", " ")
+                                      .toUpperCase()}
+                                  </span>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                      fontSize: "0.85rem",
+                                      color: "rgba(232,237,247,0.4)",
+                                    }}
+                                  >
+                                    <Clock className="w-4 h-4" />
+                                    {new Date(
+                                      transfer.transfer_time,
+                                    ).toLocaleString()}
+                                  </div>
+                                </div>
+
+                                <div style={{ spaceY: 8 }}>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      sm: {
+                                        flexDirection: "row",
+                                        alignItems: "center",
+                                      },
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        fontSize: "0.8rem",
+                                        color: "rgba(232,237,247,0.6)",
+                                        marginBottom: 4,
+                                      }}
+                                    >
+                                      Unit: {transfer.unit_serial}
+                                    </span>
+                                    {transfer.from_org_name && (
+                                      <>
+                                        <span
+                                          style={{
+                                            color: "#F7A84F",
+                                            fontWeight: 500,
+                                          }}
+                                        >
+                                          {transfer.from_org_name}
+                                        </span>
+                                        <ArrowRight
+                                          className="w-4 h-4"
+                                          style={{
+                                            color: "rgba(232,237,247,0.4)",
+                                            display: "none",
+                                            sm: { display: "block" },
+                                          }}
+                                        />
+                                        <span
+                                          style={{
+                                            color: "rgba(232,237,247,0.4)",
+                                            display: "block",
+                                            sm: { display: "none" },
+                                          }}
+                                        >
+                                          →
+                                        </span>
+                                      </>
+                                    )}
+                                    <span
+                                      style={{
+                                        color: "#00C9A7",
+                                        fontWeight: 500,
+                                      }}
+                                    >
+                                      {transfer.to_org_name}
+                                    </span>
+                                  </div>
+
+                                  {transfer.location_name && (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        fontSize: "0.85rem",
+                                        color: "#4F8EF7",
+                                      }}
+                                    >
+                                      <MapPin className="w-4 h-4" />
+                                      {transfer.location_name},{" "}
+                                      {transfer.location_country}
+                                    </div>
+                                  )}
+
+                                  {transfer.tracking_number && (
+                                    <div
+                                      style={{
+                                        fontSize: "0.85rem",
+                                        color: "rgba(232,237,247,0.4)",
+                                        background: "rgba(0,0,0,0.2)",
+                                        padding: "4px 12px",
+                                        borderRadius: "50px",
+                                        display: "inline-block",
+                                      }}
+                                    >
+                                      📦 Tracking: {transfer.tracking_number}
+                                    </div>
+                                  )}
+
+                                  {transfer.notes && (
+                                    <div
+                                      style={{
+                                        fontSize: "0.85rem",
+                                        color: "rgba(232,237,247,0.6)",
+                                        fontStyle: "italic",
+                                        marginTop: 8,
+                                      }}
+                                    >
+                                      "{transfer.notes}"
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Assembly Information for All Units */}
+                {allAssemblies.length > 0 && (
+                  <div className="card" style={{ padding: "32px 28px" }}>
+                    <h2
+                      className="syne"
+                      style={{
+                        fontSize: "1.3rem",
+                        fontWeight: 700,
+                        color: "#fff",
+                        marginBottom: 24,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <Package
+                        className="w-7 h-7"
+                        style={{ color: "#00C9A7" }}
+                      />
+                      Assembly Information
+                    </h2>
+                    <div style={{ spaceY: 24 }}>
+                      {allAssemblies.map((unitAssembly, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            padding: "20px",
+                            borderRadius: "12px",
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "1.1rem",
+                              fontWeight: 600,
+                              color: "#fff",
+                              marginBottom: 12,
+                            }}
+                          >
+                            📦 {unitAssembly.unit.serial_number}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.9rem",
+                              color: "rgba(232,237,247,0.8)",
+                              marginBottom: 16,
+                            }}
+                          >
+                            {unitAssembly.unit.product_name}
+                          </div>
+
+                          {unitAssembly.assemblies.length > 0 ? (
+                            <div
+                              className="provenance-tree"
+                              style={{ marginLeft: 20 }}
+                            >
+                              {renderAssemblyTree(unitAssembly.assemblies)}
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                fontSize: "0.85rem",
+                                color: "rgba(232,237,247,0.6)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              No assembly information available
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Original Serial Number Search Results */}
             {provenanceData && (
               <div style={{ spaceY: 32 }} className="fade-up delay-2">
                 {/* Product Information */}
@@ -656,6 +1158,359 @@ export default function ProvenancePage() {
                       ))}
                   </div>
                 </div>
+
+                {/* Child Units (Assembly Components) */}
+                {provenanceData.child_units &&
+                  provenanceData.child_units.length > 0 && (
+                    <div className="card" style={{ padding: "32px 28px" }}>
+                      <h2
+                        className="syne"
+                        style={{
+                          fontSize: "1.3rem",
+                          fontWeight: 700,
+                          color: "#fff",
+                          marginBottom: 24,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <Package
+                          className="w-7 h-7"
+                          style={{ color: "#4F8EF7" }}
+                        />
+                        Assembly Components ({provenanceData.child_units.length}
+                        )
+                      </h2>
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 16,
+                        }}
+                      >
+                        {provenanceData.child_units.map((child, index) => (
+                          <div
+                            key={child.unit_id}
+                            style={{
+                              background: "rgba(255,255,255,0.02)",
+                              border: "1px solid rgba(255,255,255,0.08)",
+                              borderRadius: 16,
+                              padding: "20px 24px",
+                              transition: "all 0.3s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background =
+                                "rgba(255,255,255,0.04)";
+                              e.currentTarget.style.borderColor =
+                                "rgba(255,255,255,0.15)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background =
+                                "rgba(255,255,255,0.02)";
+                              e.currentTarget.style.borderColor =
+                                "rgba(255,255,255,0.08)";
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "flex-start",
+                                marginBottom: 12,
+                              }}
+                            >
+                              <div>
+                                <h3
+                                  style={{
+                                    fontSize: "1.1rem",
+                                    fontWeight: 600,
+                                    color: "#fff",
+                                    marginBottom: 4,
+                                  }}
+                                >
+                                  {child.product_name}
+                                </h3>
+                                <p
+                                  style={{
+                                    fontSize: "0.9rem",
+                                    color: "rgba(232,237,247,0.7)",
+                                    fontFamily: "monospace",
+                                  }}
+                                >
+                                  {child.serial_number}
+                                </p>
+                              </div>
+                              <div
+                                className={`status-badge status-${child.status}`}
+                                style={{ marginLeft: 12 }}
+                              >
+                                {child.status}
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                  "repeat(auto-fit, minmax(200px, 1fr))",
+                                gap: 12,
+                                fontSize: "0.85rem",
+                                color: "rgba(232,237,247,0.6)",
+                              }}
+                            >
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Type:
+                                </span>{" "}
+                                {child.product_type}
+                              </div>
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Quantity:
+                                </span>{" "}
+                                {child.quantity_used}
+                              </div>
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Manufacturer:
+                                </span>{" "}
+                                {child.manufacturer?.name || "Unknown"}
+                              </div>
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Country:
+                                </span>{" "}
+                                {child.manufacturer?.country || "Unknown"}
+                              </div>
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Manufactured:
+                                </span>{" "}
+                                {child.manufacturing_date
+                                  ? new Date(
+                                      child.manufacturing_date,
+                                    ).toLocaleDateString()
+                                  : "Unknown"}
+                              </div>
+                              <div>
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: "rgba(232,237,247,0.8)",
+                                  }}
+                                >
+                                  Assembled:
+                                </span>{" "}
+                                {child.assembled_at
+                                  ? new Date(
+                                      child.assembled_at,
+                                    ).toLocaleDateString()
+                                  : "Unknown"}
+                              </div>
+                            </div>
+                            {/* Transfer History for Child Unit */}
+                            {child.transfer_history &&
+                              child.transfer_history.length > 0 && (
+                                <div
+                                  style={{
+                                    marginTop: 16,
+                                    padding: "16px 20px",
+                                    background: "rgba(255,255,255,0.015)",
+                                    border: "1px solid rgba(255,255,255,0.05)",
+                                    borderRadius: 12,
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                      marginBottom: 12,
+                                      fontSize: "0.9rem",
+                                      fontWeight: 600,
+                                      color: "rgba(232,237,247,0.9)",
+                                    }}
+                                  >
+                                    <Truck
+                                      className="w-4 h-4"
+                                      style={{ color: "#F7A84F" }}
+                                    />
+                                    Transfer History (
+                                    {child.transfer_history.length})
+                                  </div>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: 12,
+                                    }}
+                                  >
+                                    {child.transfer_history.map(
+                                      (transfer, transferIndex) => (
+                                        <div
+                                          key={transferIndex}
+                                          style={{
+                                            display: "flex",
+                                            gap: 12,
+                                            alignItems: "flex-start",
+                                            padding: "12px 16px",
+                                            background:
+                                              "rgba(255,255,255,0.02)",
+                                            borderRadius: 8,
+                                            border:
+                                              "1px solid rgba(255,255,255,0.03)",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              width: 32,
+                                              height: 32,
+                                              borderRadius: "50%",
+                                              background:
+                                                "rgba(247, 168, 79, 0.15)",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                              flexShrink: 0,
+                                            }}
+                                          >
+                                            <Truck
+                                              className="w-4 h-4"
+                                              style={{ color: "#F7A84F" }}
+                                            />
+                                          </div>
+                                          <div
+                                            style={{
+                                              flex: 1,
+                                              fontSize: "0.85rem",
+                                            }}
+                                          >
+                                            <div
+                                              style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "center",
+                                                marginBottom: 8,
+                                              }}
+                                            >
+                                              <div
+                                                className={`status-badge status-${transfer.status}`}
+                                                style={{ fontSize: "0.7rem" }}
+                                              >
+                                                {transfer.status}
+                                              </div>
+                                              <div
+                                                style={{
+                                                  color:
+                                                    "rgba(232,237,247,0.5)",
+                                                }}
+                                              >
+                                                {transfer.timestamp
+                                                  ? new Date(
+                                                      transfer.timestamp,
+                                                    ).toLocaleDateString()
+                                                  : "Unknown"}
+                                              </div>
+                                            </div>
+                                            <div
+                                              style={{
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: 8,
+                                                color: "rgba(232,237,247,0.7)",
+                                                marginBottom: 4,
+                                              }}
+                                            >
+                                              {transfer.from?.organization && (
+                                                <>
+                                                  <span>
+                                                    {transfer.from.organization}
+                                                  </span>
+                                                  <ArrowRight className="w-3 h-3" />
+                                                </>
+                                              )}
+                                              <span>
+                                                {transfer.to?.organization}
+                                              </span>
+                                            </div>
+                                            {transfer.tracking_number && (
+                                              <div
+                                                style={{
+                                                  fontSize: "0.8rem",
+                                                  color:
+                                                    "rgba(232,237,247,0.5)",
+                                                  fontFamily: "monospace",
+                                                }}
+                                              >
+                                                Tracking:{" "}
+                                                {transfer.tracking_number}
+                                              </div>
+                                            )}
+                                            {transfer.location && (
+                                              <div
+                                                style={{
+                                                  fontSize: "0.8rem",
+                                                  color:
+                                                    "rgba(232,237,247,0.5)",
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: 4,
+                                                }}
+                                              >
+                                                <MapPin className="w-3 h-3" />
+                                                {transfer.location.name},{" "}
+                                                {transfer.location.country}
+                                              </div>
+                                            )}
+                                            {transfer.notes && (
+                                              <div
+                                                style={{
+                                                  fontSize: "0.8rem",
+                                                  color:
+                                                    "rgba(232,237,247,0.6)",
+                                                  fontStyle: "italic",
+                                                  marginTop: 4,
+                                                }}
+                                              >
+                                                {transfer.notes}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ),
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                 {/* Assembly Hierarchy */}
                 {provenanceData.used_in_assemblies &&

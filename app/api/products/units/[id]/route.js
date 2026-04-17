@@ -211,7 +211,7 @@ export async function PUT(req, { params }) {
 
 export async function DELETE(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Check if product unit exists
     const [unitCheck] = await pool.execute(

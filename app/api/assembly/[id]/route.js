@@ -93,7 +93,7 @@ export async function PUT(req, { params }) {
 
 export async function DELETE(req, { params }) {
   try {
-    const { id } = params;
+    const { id } = await params;
 
     // Check if assembly relationship exists and get parent unit
     const [assemblyCheck] = await pool.execute(

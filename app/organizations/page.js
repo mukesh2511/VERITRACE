@@ -20,6 +20,8 @@ export default function OrganizationsPage() {
   const [organizations, setOrganizations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editingOrg, setEditingOrg] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [formData, setFormData] = useState({
@@ -28,15 +30,42 @@ export default function OrganizationsPage() {
     country: "",
     contact_email: "",
     phone: "",
+    address: "",
+  });
+  const [editFormData, setEditFormData] = useState({
+    id: "",
+    org_name: "",
+    org_type: "manufacturer",
+    country: "",
+    contact_email: "",
+    phone: "",
+    address: "",
   });
 
   useEffect(() => {
     fetchOrganizations();
   }, []);
 
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      fetchOrganizations();
+    }, 300); // Debounce search
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, filterStatus]);
+
   const fetchOrganizations = async () => {
     try {
-      const response = await fetch("/api/organizations/getallorg");
+      const params = new URLSearchParams();
+      if (searchTerm) {
+        params.append("search", searchTerm);
+      }
+      if (filterStatus) {
+        params.append("status", filterStatus);
+      }
+
+      const url = `/api/organizations/getallorg${params.toString() ? "?" + params.toString() : ""}`;
+      const response = await fetch(url);
       const data = await response.json();
       setOrganizations(data);
     } catch (error) {
@@ -67,6 +96,7 @@ export default function OrganizationsPage() {
           country: "",
           contact_email: "",
           phone: "",
+          address: "",
         });
       } else {
         const error = await response.json();
@@ -74,6 +104,90 @@ export default function OrganizationsPage() {
       }
     } catch (error) {
       alert("Failed to create organization");
+    }
+  };
+
+  const handleEditOrganization = async (org) => {
+    try {
+      const response = await fetch(`/api/organizations/${org.org_id}`);
+      if (response.ok) {
+        const orgData = await response.json();
+        setEditingOrg(orgData);
+        setEditFormData({
+          id: orgData.org_id,
+          org_name: orgData.org_name || "",
+          org_type: orgData.org_type || "manufacturer",
+          country: orgData.country || "",
+          contact_email: orgData.contact_email || "",
+          phone: orgData.phone || "",
+          address: orgData.address || "",
+        });
+        setShowEditForm(true);
+      } else {
+        alert("Failed to fetch organization details");
+      }
+    } catch (error) {
+      alert("Failed to fetch organization details");
+    }
+  };
+
+  const handleUpdateOrganization = async (e) => {
+    e.preventDefault();
+
+    try {
+      const response = await fetch("/api/organizations/updateorg", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(editFormData),
+      });
+
+      if (response.ok) {
+        await fetchOrganizations();
+        setShowEditForm(false);
+        setEditingOrg(null);
+        setEditFormData({
+          id: "",
+          org_name: "",
+          org_type: "manufacturer",
+          country: "",
+          contact_email: "",
+          phone: "",
+          address: "",
+        });
+      } else {
+        const error = await response.json();
+        alert(error.message || "Failed to update organization");
+      }
+    } catch (error) {
+      alert("Failed to update organization");
+    }
+  };
+
+  const handleDeleteOrganization = async (orgId, orgName) => {
+    if (
+      !confirm(
+        `Are you sure you want to delete ${orgName}? This action cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/organizations/${orgId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        await fetchOrganizations();
+        alert("Organization deleted successfully");
+      } else {
+        const error = await response.json();
+        alert(error.message || "Failed to delete organization");
+      }
+    } catch (error) {
+      alert("Failed to delete organization");
     }
   };
 
@@ -119,8 +233,9 @@ export default function OrganizationsPage() {
           pointer-events: none;
           z-index: 0;
         }
-
+ 
         .vt-content { position: relative; z-index: 1; }
+        .main { padding: 20px; }
 
         /* Grid background */
         .grid-bg {
@@ -425,8 +540,8 @@ export default function OrganizationsPage() {
 
             {/* Create Organization Modal */}
             {showCreateForm && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="glass-modal p-8 w-full max-w-2xl">
+              <div className="main fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ">
+                <div className="glass-modal main p-8 w-full max-w-2xl">
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-white">
                       Create Organization
@@ -550,6 +665,161 @@ export default function OrganizationsPage() {
                         className="glass-button-primary px-6 py-3 font-semibold"
                       >
                         Create Organization
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Edit Organization Modal */}
+            {showEditForm && (
+              <div className="main fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 ">
+                <div className="glass-modal main p-8 w-full max-w-2xl">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-white">
+                      Edit Organization
+                    </h2>
+                    <button
+                      onClick={() => setShowEditForm(false)}
+                      className="text-gray-400 hover:text-white text-2xl"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={handleUpdateOrganization}
+                    className="space-y-6"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Organization Name *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editFormData.org_name}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              org_name: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                          placeholder="Enter organization name"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Organization Type *
+                        </label>
+                        <select
+                          value={editFormData.org_type}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              org_type: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                        >
+                          {orgTypes.map((type) => (
+                            <option key={type.value} value={type.value}>
+                              {type.icon} {type.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Country
+                        </label>
+                        <input
+                          type="text"
+                          value={editFormData.country}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              country: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                          placeholder="Enter country"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Contact Email
+                        </label>
+                        <input
+                          type="email"
+                          value={editFormData.contact_email}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              contact_email: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                          placeholder="contact@organization.com"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Phone
+                        </label>
+                        <input
+                          type="tel"
+                          value={editFormData.phone}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              phone: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                          placeholder="+1-555-0123"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Address
+                        </label>
+                        <input
+                          type="text"
+                          value={editFormData.address}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              address: e.target.value,
+                            })
+                          }
+                          className="glass-input w-full"
+                          placeholder="Enter address"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end space-x-4 pt-6">
+                      <button
+                        type="button"
+                        onClick={() => setShowEditForm(false)}
+                        className="glass-button px-6 py-3"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="glass-button-primary px-6 py-3 font-semibold"
+                      >
+                        Update Organization
                       </button>
                     </div>
                   </form>
@@ -780,7 +1050,7 @@ export default function OrganizationsPage() {
                               lineHeight: 1.3,
                             }}
                           >
-                            {org.name}
+                            {org.org_name}
                           </h3>
                           <p
                             style={{
@@ -790,12 +1060,14 @@ export default function OrganizationsPage() {
                               textTransform: "capitalize",
                             }}
                           >
-                            {org.type}
+                            {org.org_type}
                           </p>
                         </div>
                       </div>
-                      <span className={`status-badge status-${org.status}`}>
-                        {org.status ? org.status.toUpperCase() : "UNKNOWN"}
+                      <span
+                        className={`status-badge status-${org.is_active ? "active" : "inactive"}`}
+                      >
+                        {org.is_active ? "ACTIVE" : "INACTIVE"}
                       </span>
                     </div>
 
@@ -808,7 +1080,7 @@ export default function OrganizationsPage() {
                         fontSize: "0.85rem",
                       }}
                     >
-                      {org.email && (
+                      {org.contact_email && (
                         <div
                           style={{
                             display: "flex",
@@ -827,7 +1099,7 @@ export default function OrganizationsPage() {
                             Email:
                           </span>
                           <span style={{ color: "#fff", fontWeight: 500 }}>
-                            {org.email}
+                            {org.contact_email}
                           </span>
                         </div>
                       )}
@@ -964,6 +1236,7 @@ export default function OrganizationsPage() {
                         }}
                       >
                         <button
+                          onClick={() => handleEditOrganization(org)}
                           className="glass-button"
                           style={{
                             fontSize: "0.8rem",
@@ -974,6 +1247,9 @@ export default function OrganizationsPage() {
                           Edit
                         </button>
                         <button
+                          onClick={() =>
+                            handleDeleteOrganization(org.org_id, org.org_name)
+                          }
                           className="glass-button-danger"
                           style={{
                             fontSize: "0.8rem",

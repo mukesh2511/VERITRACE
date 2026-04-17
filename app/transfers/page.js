@@ -31,6 +31,8 @@ export default function TransfersPage() {
     location_id: "",
     status: "shipped",
     tracking_number: "",
+    transfer_date: new Date().toISOString().split("T")[0],
+    expected_delivery_date: "",
     estimated_arrival: "",
     notes: "",
   });
@@ -123,6 +125,8 @@ export default function TransfersPage() {
           location_id: "",
           status: "shipped",
           tracking_number: "",
+          transfer_date: new Date().toISOString().split("T")[0],
+          expected_delivery_date: "",
           estimated_arrival: "",
           notes: "",
         });
@@ -657,6 +661,7 @@ export default function TransfersPage() {
                   </div>
 
                   <form onSubmit={handleCreateTransfer} style={{ spaceY: 24 }}>
+                    {/* First row - Product Unit and From Organization */}
                     <div
                       style={{
                         display: "grid",
@@ -730,7 +735,17 @@ export default function TransfersPage() {
                           ))}
                         </select>
                       </div>
+                    </div>
 
+                    {/* Second row - To Organization and Transfer Date */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, 1fr)",
+                        gap: 24,
+                        marginBottom: 24,
+                      }}
+                    >
                       <div>
                         <label
                           style={{
@@ -789,31 +804,33 @@ export default function TransfersPage() {
                           required
                         />
                       </div>
+                    </div>
 
-                      <div>
-                        <label
-                          style={{
-                            display: "block",
-                            fontSize: "0.85rem",
-                            fontWeight: 500,
-                            color: "rgba(232,237,247,0.7)",
-                            marginBottom: 8,
-                          }}
-                        >
-                          Expected Delivery Date
-                        </label>
-                        <input
-                          type="date"
-                          value={formData.expected_delivery_date}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              expected_delivery_date: e.target.value,
-                            })
-                          }
-                          className="glass-input"
-                        />
-                      </div>
+                    {/* Third row - Expected Delivery Date */}
+                    <div style={{ marginBottom: 24 }}>
+                      <label
+                        style={{
+                          display: "block",
+                          fontSize: "0.85rem",
+                          fontWeight: 500,
+                          color: "rgba(232,237,247,0.7)",
+                          marginBottom: 8,
+                        }}
+                      >
+                        Expected Delivery Date
+                      </label>
+                      <input
+                        type="date"
+                        value={formData.expected_delivery_date}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            expected_delivery_date: e.target.value,
+                          })
+                        }
+                        className="glass-input"
+                        style={{ maxWidth: "400px" }}
+                      />
                     </div>
 
                     <div style={{ marginBottom: 24 }}>
@@ -977,7 +994,7 @@ export default function TransfersPage() {
                               fontFamily: "DM Sans",
                             }}
                           >
-                            {transfer.unit_serial} - {transfer.product_name}
+                            {transfer.serial_number} - {transfer.product_name}
                           </p>
                         </div>
                       </div>
@@ -1015,7 +1032,7 @@ export default function TransfersPage() {
                           From:
                         </span>
                         <span style={{ color: "#fff", fontWeight: 500 }}>
-                          {transfer.from_org}
+                          {transfer.from_org_name || "Unknown"}
                         </span>
                       </div>
 
@@ -1037,7 +1054,7 @@ export default function TransfersPage() {
                           To:
                         </span>
                         <span style={{ color: "#fff", fontWeight: 500 }}>
-                          {transfer.to_org}
+                          {transfer.to_org_name || "Unknown"}
                         </span>
                       </div>
 
@@ -1059,9 +1076,15 @@ export default function TransfersPage() {
                           Transfer Date:
                         </span>
                         <span style={{ color: "#fff", fontWeight: 500 }}>
-                          {new Date(
-                            transfer.transfer_date,
-                          ).toLocaleDateString()}
+                          {transfer.transfer_time
+                            ? new Date(
+                                transfer.transfer_time,
+                              ).toLocaleDateString("en-US", {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              })
+                            : "Not set"}
                         </span>
                       </div>
 
@@ -1086,7 +1109,11 @@ export default function TransfersPage() {
                           <span style={{ color: "#fff", fontWeight: 500 }}>
                             {new Date(
                               transfer.expected_delivery_date,
-                            ).toLocaleDateString()}
+                            ).toLocaleDateString("en-US", {
+                              year: "numeric",
+                              month: "short",
+                              day: "numeric",
+                            })}
                           </span>
                         </div>
                       )}
@@ -1145,7 +1172,16 @@ export default function TransfersPage() {
                         }}
                       >
                         Created:{" "}
-                        {new Date(transfer.created_at).toLocaleDateString()}
+                        {transfer.created_at
+                          ? new Date(transfer.created_at).toLocaleDateString(
+                              "en-US",
+                              {
+                                year: "numeric",
+                                month: "short",
+                                day: "numeric",
+                              },
+                            )
+                          : "Unknown"}
                       </div>
                       <div
                         style={{

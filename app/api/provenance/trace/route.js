@@ -116,6 +116,88 @@ export async function POST(req) {
       [component_unit_id, max_depth],
     );
 
+    // Get child units that make up this component (forward trace)
+    const [childUnits] = await pool.execute(
+      `
+      SELECT 
+        ar.child_unit_id,
+        ar.quantity,
+        pu.serial_number as child_serial_number,
+        pu.status as child_status,
+        pu.manufacturing_date as child_manufacturing_date,
+        pc.product_name as child_product_name,
+        pc.product_type as child_product_type,
+        org.org_name as child_manufacturer_name,
+        org.country as child_manufacturer_country,
+        ar.assembled_at
+      FROM assembly_relationship ar
+      JOIN product_unit pu ON ar.child_unit_id = pu.unit_id
+      JOIN product_catalog pc ON pu.catalog_id = pc.catalog_id
+      LEFT JOIN organizations org ON pu.manufacturer_org_id = org.org_id
+      WHERE ar.parent_unit_id = ?
+      ORDER BY ar.assembled_at DESC
+      `,
+      [component_unit_id],
+    );
+
+    // Get transfer history for child units
+    let childUnitsWithTransfers = childUnits;
+    if (finalIncludeTransfers && childUnits.length > 0) {
+      const childUnitIds = childUnits.map((child) => child.child_unit_id);
+
+      const [childTransfers] = await pool.execute(
+        `
+        SELECT tl.unit_id, tl.transfer_time, tl.status, tl.tracking_number, tl.notes,
+               from_org.org_name as from_org_name, from_org.country as from_country,
+               to_org.org_name as to_org_name, to_org.country as to_country,
+               l.location_name, l.country as location_country
+        FROM transfer_log tl
+        LEFT JOIN organizations from_org ON tl.from_org_id = from_org.org_id
+        LEFT JOIN organizations to_org ON tl.to_org_id = to_org.org_id
+        LEFT JOIN locations l ON tl.location_id = l.location_id
+        WHERE tl.unit_id IN (${childUnitIds.map(() => "?").join(",")})
+        ORDER BY tl.unit_id, tl.transfer_time ASC
+        `,
+        childUnitIds,
+      );
+
+      // Group transfers by unit_id
+      const transfersByUnit = {};
+      childTransfers.forEach((transfer) => {
+        if (!transfersByUnit[transfer.unit_id]) {
+          transfersByUnit[transfer.unit_id] = [];
+        }
+        transfersByUnit[transfer.unit_id].push({
+          timestamp: transfer.transfer_time,
+          status: transfer.status,
+          tracking_number: transfer.tracking_number,
+          notes: transfer.notes,
+          from: transfer.from_org_name
+            ? {
+                organization: transfer.from_org_name,
+                country: transfer.from_country,
+              }
+            : null,
+          to: {
+            organization: transfer.to_org_name,
+            country: transfer.to_country,
+          },
+          location: transfer.location_name
+            ? {
+                name: transfer.location_name,
+                country: transfer.location_country,
+              }
+            : null,
+        });
+      });
+
+      // Add transfer history to child units
+      childUnitsWithTransfers = childUnits.map((child) => ({
+        ...child,
+        transfer_history: transfersByUnit[child.child_unit_id] || [],
+      }));
+    }
+
     // Get transfer history for this component
     let transferHistory = [];
     if (finalIncludeTransfers) {
@@ -195,6 +277,7 @@ export async function POST(req) {
     const traceData = {
       component: {
         unit_id: component.unit_id,
+        catalog_id: component.catalog_id,
         serial_number: component.serial_number,
         product_name: component.product_name,
         product_type: component.product_type,
@@ -205,6 +288,21 @@ export async function POST(req) {
           country: component.manufacturer_country,
         },
       },
+      child_units: childUnitsWithTransfers.map((child) => ({
+        unit_id: child.child_unit_id,
+        serial_number: child.child_serial_number,
+        product_name: child.child_product_name,
+        product_type: child.child_product_type,
+        status: child.child_status,
+        manufacturing_date: child.child_manufacturing_date,
+        quantity_used: child.quantity,
+        manufacturer: {
+          name: child.child_manufacturer_name,
+          country: child.child_manufacturer_country,
+        },
+        assembled_at: child.assembled_at,
+        transfer_history: child.transfer_history || [],
+      })),
       used_in_assemblies: assemblyTree,
       transfer_history: transferHistory.map((transfer) => ({
         timestamp: transfer.transfer_time,
@@ -241,6 +339,7 @@ export async function POST(req) {
           assemblyTrace.length > 0
             ? Math.max(...assemblyTrace.map((a) => a.level))
             : 0,
+        child_units_count: childUnits.length,
         transfer_count: transferHistory.length,
         status_changes: statusHistory.length,
       },
